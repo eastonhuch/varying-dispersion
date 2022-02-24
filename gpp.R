@@ -209,7 +209,8 @@ update_score_information <- function(working_list) {
   )[seq(working_list[["num_scored_parameters"]])]
 
   # Fisher information (J)
-  working_list[["J_beta"]] <- t(X) %*% diag(wii) %*% X
+  X_sqrt_wii <- sqrt(wii) * X
+  working_list[["J_beta"]] <- crossprod(X_sqrt_wii)
   if (working_list[["phi_method"]] == "joint") {
     working_list[["J_phi"]] <- sum(2*mu^{2*(P-1)} / denom)
     working_list[["J_beta_phi"]] <-t(X) %*% ({P-2}*phi*mu^{2*(P-1)} / denom)
