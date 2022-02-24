@@ -418,7 +418,7 @@ gpp <- function(
   # Update Fisher info again
   working_list <- update_score_information(working_list)
 
-	working_list[c(
+	result_list <- working_list[c(
 	  "beta",
 	  "phi",
 	  "J_beta",
@@ -429,4 +429,6 @@ gpp <- function(
 	  "mu",
 	  "P"
 	)]
+	result_list[["iters"]] <- iters
+	result_list
 }
