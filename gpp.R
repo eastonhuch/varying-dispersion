@@ -12,7 +12,7 @@ repeat_if_necessary <- function(val, n) {
 
 check_gp_parameter_space <- function(theta, delta) {
   # Returns TRUE if the parameter space is value
-  # Otherwise, issues a warning and retuns FALSE
+  # Otherwise, issues a warning and returns FALSE
 
   # Check on individual parameters
   theta_is_valid <- theta > 0
@@ -20,7 +20,11 @@ check_gp_parameter_space <- function(theta, delta) {
 
   # Check combination of parameter values
   delta_is_nonnegative <- delta >= 0
-  delta_above_lower_bound <- max(-1, -theta/4) < delta
+  lower_bound <- rep(-1, length(delta))
+  neg_theta_over_4 <- -theta/4
+  low_theta <- neg_theta_over_4 > -1
+  lower_bound[low_theta] <- neg_theta_over_4[low_theta]
+  delta_above_lower_bound <- lower_bound <= delta
   combination_is_valid <- delta_is_nonnegative | delta_above_lower_bound
 
   # Bring all conditions together
