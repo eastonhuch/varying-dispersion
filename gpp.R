@@ -24,7 +24,7 @@ check_gp_parameter_space <- function(theta, delta) {
   neg_theta_over_4 <- -theta/4
   low_theta <- neg_theta_over_4 > -1
   lower_bound[low_theta] <- neg_theta_over_4[low_theta]
-  delta_above_lower_bound <- lower_bound <= delta
+  delta_above_lower_bound <- lower_bound < delta
   combination_is_valid <- delta_is_nonnegative | delta_above_lower_bound
 
   # Bring all conditions together
@@ -53,7 +53,8 @@ check_gp_y_values <- function(y, theta, delta) {
   # Otherwise, it issues a warning and returns FALSE
   m <- get_max_y(theta, delta)
   ys_are_valid <- y <= m
-  if (! all(ys_are_valid)) warning("Some y values are above the support")
+  any_problems <- (!all(ys_are_valid)) || any(is.na(ys_are_valid))
+  if (any_problems) warning("Some y values are above the support")
   ys_are_valid
 }
 
