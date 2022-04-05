@@ -6,7 +6,7 @@ source("./gpp.R")
 
 # Read in and process data
 dat <- read.csv("./ship_incidents.csv")
-# Data is available from "Generalized Linear Models" by McCullagh & Nelder
+# Data comes from "Generalized Linear Models" by McCullagh & Nelder
 remove_row <- dat$Necessarily.Empty.Cell | dat$Accidentally.Empty.Cell
 dat <- dat[!remove_row,] # Filter down to ships in service
 my_formula <- formula(
