@@ -7,7 +7,7 @@ dat <- read.csv("./train_vehicle_collisions.csv")
 # https://ceprofs.civil.tamu.edu/dlord/Highway_Safety_Analytics_and_Modeling.htm
 
 # Data transformations
-my_formula <- formula(Crashes ~ LNAADT + ADRT + PCA + TDD + PSH)
+my_formula <- formula(Crashes ~ LNAADT + PCA + TDD + PTCC + PG + PSH)
 X <- model.matrix(my_formula, data=dat)
 num_predictors <- ncol(X)
 X[,2:num_predictors] <- scale(X[,2:num_predictors])
@@ -32,6 +32,8 @@ gp1 <- gpp(
 
 # Regularized fit
 penalty <- c(0, rep(1e2, num_predictors-1), 0)
+betastart_regularized <- rep(0, num_predictors)
+betastart_regularized[1] <- log(mean(y))
 gp1_penalized <- gpp(
   y, X, betastart=betastart_regularized, phistart=phistart,
   P=1, tol=tol, penalty=penalty, max_iter=max_iter, phi_method=phi_method, stephalving_max=stephalving_max,
@@ -66,4 +68,3 @@ plot(penalties, phis, type="l", log="x",
      xlab="penalty", ylab=expression(paste("Estimated value of ", varphi)))
 abline(h=0, col=2)
 dev.off()
-
