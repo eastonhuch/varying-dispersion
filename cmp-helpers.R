@@ -67,6 +67,7 @@ fit_cmp <- function(formula_mu, formula_nu, data, delta=0.0001) {
     sqrt(t(grad_k) %*% vcov_full %*% grad_k)
   })
   
+  mod_cmp$sd_estimates <- sd_hats
   mod_cmp$sd_lower_bounds <- sd_hats - 1.96 * sd_ses
   mod_cmp$sd_upper_bounds <- sd_hats + 1.96 * sd_ses
   mod_cmp$sd_interval_widths <- mod_cmp$sd_upper_bounds - mod_cmp$sd_lower_bounds
