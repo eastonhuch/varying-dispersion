@@ -422,18 +422,72 @@ gpp <- function(
 
   # Update Fisher info again
   working_list <- update_score_information(working_list)
+  result_list <- working_list[c(
+    "beta",
+    "phi",
+    "J_beta",
+    "J_phi",
+    "J_beta_phi",
+    "J_star",
+    "loss",
+    "mu",
+    "P"
+  )]
+  result_list[["iters"]] <- iters
+  result_list[["fitted_values"]] <- result_list[["mu"]]
+  full_cov <- chol2inv(chol(result_list[["J_star"]]))
+  if (nrow(full_cov) == k) {
+    result_list[["cov_beta"]] <- full_cov
+    result_list[["cov_theta"]] <- full_cov
+  } else if (nrow(full_cov) == (k+1)) {
+    result_list[["cov_beta"]] <- full_cov[1:k, 1:k]
+    result_list[["cov_theta"]] <- full_cov
+  } else {
+    stop("nrow(full_cov) should be k or k+1")
+  }
+  
+  # Calculate standard errors for fitted values
+  fitted_ses <- sapply(seq(n), function(j) {
+    x <- X[j,]
+    result_list[["mu"]][j] * sqrt(c(t(x) %*% result_list[["cov_beta"]] %*% x))
+    # NOTE: Need fitted value because we're applying delta method
+  })
+  
+  # Create confidence intervals for fitted values
+  result_list[["fitted_lower_bounds"]] <- result_list[["mu"]] - 1.96 * fitted_ses
+  result_list[["fitted_upper_bounds"]] <- result_list[["mu"]] + 1.96 * fitted_ses
+  result_list[["fitted_interval_widths"]] <- result_list[["fitted_upper_bounds"]] - result_list[["fitted_lower_bounds"]]
+  
+  # Calculated fitted standard deviations
+  result_list[["var_estimates"]] <- (1 + result_list[["phi"]] * result_list[["mu"]]^(P-1))^2 * result_list[["mu"]]
+  result_list[["sd_estimates"]] <- sqrt(result_list[["var_estimates"]])
+  
+  # Add confidence intervals for standard deviation if joint method is used
+  if (phi_method == "joint") {
+    # Calculate standard errors for standard deviations
+    sd_ses <- sapply(seq(n), function(j) {
+      x_j <- X[j,]
+      mu_j <- result_list[["mu"]][j]
+      phi <- result_list[["phi"]]
+      grad <- rep(0, k+1)
+      # Calculate the below using Wolfram Alpha: d/d\theta \sqrt{[1 + \phi * exp(x*\theta)^(p-1)]^2 * exp(x*\theta)}
+      grad[1:k] <- x_j * (
+        (2*(P-1)*phi*mu_j^P*(phi*mu_j^(P-1) + 1) + mu_j*(phi*mu_j^(P-1) + 1)^2) /
+          (2 * sqrt(mu_j * (phi*mu_j^(P-1) + 1)^2))
+      )
+      # Calculate the below using Wolfram Alpha: d/d\phi \sqrt{[1 + \phi * exp(x*\theta)^(p-1)]^2 * exp(x*\theta)}
+      grad[k+1] <- mu_j^P * sqrt((mu_j + phi*mu_j^P)^2 / mu_j) / (mu_j + phi*mu_j^P)
+      
+      # Delta method
+      sqrt(c(t(grad) %*% result_list[["cov_theta"]] %*% grad))
+    })
 
-	result_list <- working_list[c(
-	  "beta",
-	  "phi",
-	  "J_beta",
-	  "J_phi",
-	  "J_beta_phi",
-	  "J_star",
-	  "loss",
-	  "mu",
-	  "P"
-	)]
-	result_list[["iters"]] <- iters
+    # Create confidence intervals for fitted values
+    result_list[["sd_lower_bounds"]] <- result_list[["sd_estimates"]] - 1.96 * sd_ses
+    result_list[["sd_upper_bounds"]] <- result_list[["sd_estimates"]] + 1.96 * sd_ses
+    result_list[["sd_interval_widths"]] <- result_list[["sd_upper_bounds"]] - result_list[["sd_lower_bounds"]] 
+  }
+  
+  # Return result list
 	result_list
 }
