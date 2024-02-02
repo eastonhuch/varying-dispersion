@@ -40,7 +40,7 @@ phi_method <- "joint"
 stephalving_max <- 10
 
 # Prepare to loop
-reps <- 100L
+reps <- 2L
 method_names <- c("MPCMP", "GP-1", "EPL")
 # method_names <- c("GP-1", "EPL")  # Removing a method from the list removes it from the simulation
 num_methods <- length(method_names)
