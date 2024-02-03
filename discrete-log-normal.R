@@ -7,9 +7,10 @@ ll_latentnorm <- function(y, X, Z, beta, alpha) {
   z_bar <- (log1p(y) - mu) / sigma 
   z_underbar <- (log(y) - mu) / sigma
   ll <- pnorm(z_underbar, log.p=TRUE) + log(exp(pnorm(z_bar, log.p=TRUE) - pnorm(z_underbar, log.p=TRUE)) - 1)
-  return(ll)
+  mean(ll)
 }
 
+# This is the hardest part!
 get_kappa <- function(z_bar, z_underbar, q) {
   if (any(z_underbar >= z_bar)) stop("z_bar must be greater than z_underbar")
   
@@ -73,16 +74,17 @@ get_kappa <- function(z_bar, z_underbar, q) {
   kappa_q
 }
 
-z_underbar <- c(-100, -7, -1, 0, 6, 20, 99)
-z_bar <-      c( -99, -6,  0, 1, 7, 21, 100)
-q <- 2
-get_kappa(z_bar, z_underbar, q)
-(z_bar^q * dnorm(z_bar) - z_underbar^q * dnorm(z_underbar)) /
-  (pnorm(z_bar) - pnorm(z_underbar))
+# Tests for the above function
+# z_underbar <- c(-Inf, -100, -7, -1, 0, 6, 20, 99)
+# z_bar <-      c(-4. ,  -99, -6,  0, 1, 7, 21, 100)
+# q <- 3
+# get_kappa(z_bar, z_underbar, q)
+# (z_bar^q * dnorm(z_bar) - z_underbar^q * dnorm(z_underbar)) /
+#   (pnorm(z_bar) - pnorm(z_underbar))
 
-gradutils <- function(y, X, beta, alpha) {
+gradutils <- function(y, X, Z, beta, alpha) {
   mu <- drop(X %*% beta)
-  sigma <- exp(drop(X %*% alpha))
+  sigma <- exp(drop(Z %*% alpha))
   
   z_bar <- (log1p(y) - mu) / sigma 
   z_underbar <- (log(y) - mu) / sigma
@@ -92,144 +94,171 @@ gradutils <- function(y, X, beta, alpha) {
   kappa_2 <- get_kappa(z_bar, z_underbar, 2)
   kappa_3 <- get_kappa(z_bar, z_underbar, 3)
   
-  return(list(kappa_0, kappa_1, kappa_2, kappa_3, mu, sigma))
+  list(
+    kappa_0=kappa_0,
+    kappa_1=kappa_1,
+    kappa_2=kappa_2,
+    kappa_3=kappa_3,
+    mu=mu,
+    sigma=sigma
+  )
 }
 
-vec_matrix_multiply <- function(a, B) {
-  return(t(apply(B, 1, function(x) x * a)))
+em_gradutils <- function(Z, sigma, v, alpha) {
+  grad <- t(Z) %*% (v/sigma^2 - 1)
+  hess <- -2 * crossprod(sqrt(v)/sigma * Z)
+  list(
+    grad=grad,
+    hess=hess
+  )
 }
 
-em_gradutils <- function(W, sigma, c, alpha, return_hessian = FALSE) {
-  sigma_neg_2 <- sigma^(-2)
-  grad <- t(W) %*% (sigma_neg_2 * c - 1) - alpha
-  hessian <- NULL
-  if (return_hessian) {
-    W_sqrt_k <- vec_matrix_multiply(sqrt(c)/sigma, W)
-    hessian <- -2 * t(W_sqrt_k) %*% W_sqrt_k
-  }
-  return(list(grad, hessian))
-}
+dln <- function(
+  y, X, Z, betastart, alphastart, method="Newton",
+  max_iter = 100, stephalving_maxiter=10, tol=1e-8, verbose=TRUE) {
+  
+  # Initialize some values
+  result_list <- list()
+  n <- nrow(X)
+  p <- ncol(X)
+  q <- ncol(Z)
+  beta_idx <- seq(p)
+  alpha_idx <- seq(p+1, p+q)
+  
+  # A bunch of helper functions
+  get_log_like <- function(beta, alpha) ll_latentnorm(y, X, Z, beta, alpha)
+  get_dev <- function(beta, alpha) -2 * get_log_like(beta, alpha)  # Doesn't include additive factor for saturated model
 
-discrete_lognormal <- function(endog, exog, start_params = NULL, method = "EM", maxiter = 100, use_hessian = FALSE, step_size = 1e-4, tol = 1e-6, penalty = 0) {
-  nparams <- 22
-  nloglikeobs <- function(params) {
-    beta <- params[1:11]
-    alpha <- params[12:22]
-    ll <- ll_latentnorm(endog, exog, beta, alpha)
-    params_alt <- params
-    params_alt[1] <- 0
-    return(-ll - penalty * sum(params_alt^2) / length(endog))
+  get_grad <- function(beta, alpha) {
+    gradutils_result <- gradutils(y, X, Z, beta, alpha)
+    grad_beta <- -colMeans(gradutils_result$kappa_0 / gradutils_result$sigma * X)
+    grad_alpha <- -colMeans(gradutils_result$kappa_1 * Z)
+    c(grad_beta, grad_alpha)
   }
   
-  score <- function(params) {
-    beta <- params[1:11]
-    alpha <- params[12:22]
-    gradutils_result <- gradutils(endog, exog, beta, alpha)
-    kappa_0 <- gradutils_result[[1]]
-    kappa_1 <- gradutils_result[[2]]
-    kappa_2 <- gradutils_result[[3]]
-    kappa_3 <- gradutils_result[[4]]
-    mu <- gradutils_result[[5]]
-    sigma <- gradutils_result[[6]]
-    grad_beta <- -matrix(kappa_0 / sigma, nrow = length(endog), ncol = 1) %*% exog - penalty * 2 * beta
-    grad_alpha <- -kappa_1 %*% exog - penalty * 2 * alpha
-    return(c(grad_beta, grad_alpha))
-  }
-  
-  hessian <- function(params) {
-    beta <- params[1:11]
-    alpha <- params[12:22]
-    gradutils_result <- gradutils(endog, exog, beta, alpha)
-    kappa_0 <- gradutils_result[[1]]
-    kappa_1 <- gradutils_result[[2]]
-    kappa_2 <- gradutils_result[[3]]
-    kappa_3 <- gradutils_result[[4]]
-    mu <- gradutils_result[[5]]
-    sigma <- gradutils_result[[6]]
+  get_hess <- function(beta, alpha) {
+    # Calculate kappas, mu, and sigma
+    gradutils_result <- gradutils(y, X, Z, beta, alpha)
+    kappa_0 <- gradutils_result$kappa_0
+    kappa_1 <- gradutils_result$kappa_1
+    kappa_2 <- gradutils_result$kappa_2
+    kappa_3 <- gradutils_result$kappa_3
+    mu <- gradutils_result$mu
+    sigma <- gradutils_result$sigma
+    
     k_beta <- (kappa_0^2 + kappa_1) / sigma^2
     k_alpha <- kappa_1 * (kappa_1 - 1) + kappa_3
     k_beta_alpha <- (kappa_2 + kappa_0 * (kappa_1 - 1)) / sigma
-    H_beta <- Matrix(0, nrow = 11, ncol = 11)
-    H_alpha <- Matrix(0, nrow = 11, ncol = 11)
-    H_beta_alpha <- Matrix(0, nrow = 11, ncol = 11)
-    for (i in 1:nrow(exog)) {
-      x <- matrix(exog[i,], nrow = 1)
-      xxT <- tcrossprod(x)
-      H_beta <- H_beta - k_beta[i] * xxT
-      H_alpha <- H_alpha - k_alpha[i] * xxT
-      H_beta_alpha <- H_beta_alpha - k_beta_alpha[i] * xxT
-    }
-    H_all <- rbind(cbind(H_beta, H_beta_alpha), cbind(t(H_beta_alpha), H_alpha))
-    penalty_matrix <- penalty * 2 * diag(nparams)
-    penalty_matrix[1, 1] <- 0
-    return(H_all - penalty_matrix)
+    
+    hess11 <- -crossprod(sqrt(k_beta) * X) / n
+    hess12 <- -(t(X) %*% (k_beta_alpha * Z)) / n
+    hess22 <- -crossprod(sqrt(k_alpha) * Z) / n
+    hess <- rbind(
+      cbind(hess11, hess12),
+      cbind(t(hess12), hess22)
+    )
+    hess
   }
   
-  if (is.null(start_params)) {
-    start_params <- rep(0, nparams)
-    start_params[1] <- log(mean(endog))
-  }
+  # Prepare to loop
+  dev_last <- Inf
+  dev <- get_dev(betastart, alphastart)
+  beta <- betastart
+  alpha <- alphastart
+  theta <- c(betastart, alphastart)
   
-  if (method == "EM") {
-    loss <- mean(nloglikeobs(start_params))
-    beta <- start_params[1:11]
-    alpha <- start_params[12:22]
-    W <- exog
-    penalty_alpha <- penalty * diag(11)
-    WtW_plus_penalty <- t(W) %*% W + penalty_alpha
-    penalty_beta <- penalty_alpha
-    penalty_beta[1, 1] <- 0
-    converged <- FALSE
-    for (i in 1:maxiter) {
-      loss_last <- loss
-      gradutils_result <- gradutils(endog, exog, beta, alpha)
-      e1 <- mu <- gradutils_result[[5]] - sigma <- gradutils_result[[6]] * kappa_0 <- gradutils_result[[1]]
-      e2 <- (sigma^2 - sigma^2 * kappa_1 + mu^2 - 2 * mu * sigma * kappa_0)
-      X_sqrt_w <- vec_matrix_multiply(1 / sigma, exog)
-      XtSiX <- t(X_sqrt_w) %*% X_sqrt_w
-      XtSiX <- XtSiX + penalty_beta
-      XtSie1 <- t(exog) %*% (sigma^(-2) * e1)
-      beta <- solve(XtSiX, XtSie1)
-      c <- e2 - 2 * e1 * mu + mu^2
-      if (use_hessian) {
-        em_gradutils_result <- em_gradutils(W, sigma, c, alpha, return_hessian = TRUE)
-        grad <- em_gradutils_result[[1]]
-        hessian <- em_gradutils_result[[2]]
-        grad <- grad - alpha
-        hessian <- hessian - penalty_alpha
-        alpha <- alpha - solve(hessian, grad)
-      } else {
-        grad <- em_gradutils(W, sigma, c, alpha)
-        d <- -grad
-        prop_increase <- 0.5
-        step_multiplier <- 0.5
-        curr_step_size <- step_size
-        f_start <- sum(nloglikeobs(c(beta, alpha)))
-        while (TRUE) {
-          alpha_prop <- alpha - curr_step_size * d
-          f_stop <- sum(nloglikeobs(c(beta, alpha_prop)))
-          required_change <- prop_increase * curr_step_size * sum(grad * d)
-          if (f_stop - f_start <= required_change) {
-            break
-          }
-          curr_step_size <- curr_step_size * step_multiplier
+  # Model-fitting loop
+  iter <- 0
+  if (verbose) cat("Iteration: ", iter, ", Deviance: ", dev, "\n", sep="")
+  while (((dev_last - dev) > tol) && (iter <= max_iter)) {
+    # Looping mechanics
+    iter <- iter + 1
+    dev_last <- dev
+    
+    if (method == "Newton") {
+      grad <- get_grad(beta, alpha)
+      hess <- get_hess(beta, alpha)
+      inc <- solve(hess, grad)
+      dev <- Inf
+      step <- 1
+      stephalving_iter <- 0
+      while (((dev >= dev_last) || (!is.finite(dev))) && (stephalving_iter <= stephalving_maxiter)) {
+        theta_new <- theta - step * inc
+        dev <- get_dev(theta_new[beta_idx], theta_new[alpha_idx])
+        if (verbose && (stephalving_iter > 0)) {
+          cat(
+            "Step-halving Iterations: ", stephalving_iter,
+            ", Deviance: ", dev,
+            "\n", sep="")
         }
+        stephalving_iter <- stephalving_iter + 1
+        step <- step / 2
       }
-      alpha_prop <- alpha - curr_step_size * d
-      alpha <- alpha_prop
-      loss <- mean(nloglikeobs(c(beta, alpha)))
-      obj <- loss_last - loss
-      if (abs(obj) < tol) {
-        converged <- TRUE
-        break
+      theta <- theta_new
+      beta <- theta[beta_idx]
+      alpha <- theta[alpha_idx]
+    } else if (method == "EM") {
+      # Update beta
+      gradutils_result <- gradutils(y, X, Z, beta, alpha)
+      e1 <- gradutils_result$mu - gradutils_result$sigma * gradutils_result$kappa_0
+      beta <- solve(
+        crossprod(X / gradutils_result$sigma),
+        t(X) %*% (e1 / gradutils_result$sigma^2))
+      
+      # Update alpha
+      gradutils_result <- gradutils(y, X, Z, beta, alpha)  # Need to update these again
+      mu <- gradutils_result$mu
+      sigma <- gradutils_result$sigma
+      kappa_0 <- gradutils_result$kappa_0
+      kappa_1 <- gradutils_result$kappa_1
+      e1 <- mu - sigma * kappa_0
+      e2 <- (sigma^2 - sigma^2*kappa_1+mu^2 - 2*mu*sigma*kappa_0) # Need to double-check this
+      v <- e2 - 2*e1*mu + mu^2
+      em_gradutils_result <- em_gradutils(Z, sigma, v, alpha)
+      inc <- solve(em_gradutils_result$hess, em_gradutils_result$grad)
+      dev <- Inf
+      step <- 1
+      stephalving_iter <- 0
+      while (((dev >= dev_last) || (!is.finite(dev))) && (stephalving_iter <= stephalving_maxiter)) {
+        alpha_new <- alpha - step * inc
+        dev <- get_dev(beta, alpha_new)
+        if (verbose && (stephalving_iter > 0)) {
+          cat(
+            "Step-halving Iterations: ", stephalving_iter,
+            ", Deviance: ", dev,
+            "\n", sep="")
+        }
+        stephalving_iter <- stephalving_iter + 1
+        step <- step / 2
       }
+      alpha <- alpha_new
+      theta <- c(beta, alpha)
+    } else {
+      stop("method must be 'Newton' or 'EM'")
     }
-    if (!converged) {
-      stop("Hit maxiter and failed to converge")
-    }
-    params <- c(beta, alpha)
-    return(list(params = params, loss = loss, converged = converged))
-  } else {
-    stop("Unsupported method")
+    if (verbose) cat("Iteration: ", iter, ", Deviance: ", dev, "\n", sep="")
   }
+  
+  # Add results to list
+  theta <- c(beta, alpha)
+  result_list$beta <- beta
+  result_list$alpha <- alpha
+  result_list$theta <- theta
+
+  result_list
 }
+
+mod_dln_newton <- dln(y, X, Z, beta_start, alpha_start, method="Newton", max_iter=100, stephalving_maxiter=10, tol=1e-16, verbose=TRUE)
+mod_dln_em <- dln(y, X, Z, beta_start, alpha_start, method="EM", max_iter=100, stephalving_maxiter=10, tol=1e-16, verbose=TRUE)
+
+# Same estimates!!!
+mod_dln_newton$theta
+mod_dln_em$theta
+
+# Use this for testing
+# betastart <- beta_start
+# alphastart <- alpha_start
+# max_iter <- 100
+# stephalving_maxiter <- 10
+# tol <- 1e-8
+# verbose <- TRUE
