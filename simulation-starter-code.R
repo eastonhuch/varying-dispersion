@@ -9,7 +9,7 @@ source("moment-methods.R")
 
 # Generate some data
 set.seed(1)
-n <- 100L
+n <- 400L
 x1 <- rnorm(n)  # We'll keep the design fixed across simulations
 x2 <- rnorm(n)
 x3 <- rnorm(n)
@@ -40,8 +40,8 @@ phi_method <- "joint"
 stephalving_max <- 10
 
 # Prepare to loop
-reps <- 2L
-method_names <- c("MPCMP", "GP-1", "EPL")
+reps <- 20L
+method_names <- c("MPCMP", "GP-1", "EPL", "DLN-Newton", "DLN-EM")
 # method_names <- c("GP-1", "EPL")  # Removing a method from the list removes it from the simulation
 num_methods <- length(method_names)
 mu_estimates <- array(0, dim=c(n, reps, num_methods), dimnames = list(NULL, NULL, method_names))
@@ -118,6 +118,36 @@ for (i in seq(reps)) {
     sd_covered[,i,"EPL"] <- (mod_epl$sd_lower_bounds <= sd_true) & (sd_true <= mod_epl$sd_upper_bounds)
     sd_interval_widths[,i,"EPL"] <- mod_epl$sd_interval_widths
   })
+  
+  # Fit DLN-Newton model
+  if ("DLN-Newton" %in% method_names ) try({
+    start_time <- Sys.time()
+    mod_quasipois <- glm(y ~ x1 + x2, family=quasipoisson(), data=dat)
+    beta_start <- mod_quasipois$coefficients
+    alpha_start <- rep(0, ncol(Z))
+    names(alpha_start) <- colnames(Z)
+    alpha_start[1] <- log(sqrt(summary(mod_quasipois)$dispersion))
+    mod_dln_newton <- dln(y, X, Z, betastart = beta_start, alphastart = alpha_start, method="Newton",
+                   max_iter=max_iter, stephalving_maxiter=stephalving_max, tol=1e-8, verbose=FALSE)
+    end_time <- Sys.time()
+    elapsed_time <- end_time - start_time
+    fitting_times[i,"DLN-Newton"] <- elapsed_time
+  })
+  
+  # Fit DLN-EM model
+  if ("DLN-EM" %in% method_names ) try({
+    start_time <- Sys.time()
+    mod_quasipois <- glm(y ~ x1 + x2, family=quasipoisson(), data=dat)
+    beta_start <- mod_quasipois$coefficients
+    alpha_start <- rep(0, ncol(Z))
+    names(alpha_start) <- colnames(Z)
+    alpha_start[1] <- log(sqrt(summary(mod_quasipois)$dispersion))
+    mod_dln_newton <- dln(y, X, Z, betastart = beta_start, alphastart = alpha_start, method="EM",
+                          max_iter=max_iter, stephalving_maxiter=stephalving_max, tol=1e-8, verbose=FALSE)
+    end_time <- Sys.time()
+    elapsed_time <- end_time - start_time
+    fitting_times[i,"DLN-EM"] <- elapsed_time
+  })
 }
 
 nominal_coverage <- 0.95
@@ -127,7 +157,7 @@ format_percent <- label_percent(0.1)
 # Fitting times
 avg_fitting_times <- colMeans(fitting_times)
 consolidated_results <- data.frame(`Avg Elapsed Time (Seconds)`=format_float(avg_fitting_times), check.names=FALSE)
-boxplot(fitting_times, log="y", main="Model-fitting Time by Method", ylab="Avg Elapsed Time (Seconds)")
+boxplot(fitting_times, log="y", main="Model-fitting Time by Method", ylab="Elapsed Time (Seconds)")
 
 # Mean
 mu_rmse <- sqrt(apply((mu_estimates - mu)^2, MARGIN=c(1,3), mean))
