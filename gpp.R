@@ -291,7 +291,7 @@ gr_log_search <- function(f, lower, upper=1e4, tol=1e-8) {
 ################################################################################
 # Fit GP-P via Fisher scoring
 gpp <- function(
-  y, X, betastart, phistart, P, tol=1e-6, max_iter=100, phi_method="joint",
+  y, X, betastart, phistart, P, tol=1e-8, max_iter=100, phi_method="joint",
   stephalving_max=10, penalty=NULL, regularize_intercept=FALSE, offset=NULL,
   phi_max=1e4, verbose=FALSE) {
   # Fits the GP-P regression model using one of a variety of methods
@@ -482,7 +482,7 @@ gpp <- function(
       sqrt(c(t(grad) %*% result_list[["cov_theta"]] %*% grad))
     })
 
-    # Create confidence intervals for fitted values
+    # Create confidence intervals for standard deviations
     result_list[["sd_lower_bounds"]] <- result_list[["sd_estimates"]] - 1.96 * sd_ses
     result_list[["sd_upper_bounds"]] <- result_list[["sd_estimates"]] + 1.96 * sd_ses
     result_list[["sd_interval_widths"]] <- result_list[["sd_upper_bounds"]] - result_list[["sd_lower_bounds"]] 
