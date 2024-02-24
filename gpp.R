@@ -465,22 +465,14 @@ gpp <- function(
   # Add confidence intervals for standard deviation if joint method is used
   if (phi_method == "joint") {
     # Calculate standard errors for standard deviations
-    sd_ses <- sapply(seq(n), function(j) {
-      x_j <- X[j,]
-      mu_j <- result_list[["mu"]][j]
-      phi <- result_list[["phi"]]
-      grad <- rep(0, k+1)
-      # Calculate the below using Wolfram Alpha: d/d\theta \sqrt{[1 + \phi * exp(x*\theta)^(p-1)]^2 * exp(x*\theta)}
-      grad[1:k] <- x_j * (
-        (2*(P-1)*phi*mu_j^P*(phi*mu_j^(P-1) + 1) + mu_j*(phi*mu_j^(P-1) + 1)^2) /
-          (2 * sqrt(mu_j * (phi*mu_j^(P-1) + 1)^2))
-      )
-      # Calculate the below using Wolfram Alpha: d/d\phi \sqrt{[1 + \phi * exp(x*\theta)^(p-1)]^2 * exp(x*\theta)}
-      grad[k+1] <- mu_j^P * sqrt((mu_j + phi*mu_j^P)^2 / mu_j) / (mu_j + phi*mu_j^P)
-      
-      # Delta method
-      sqrt(c(t(grad) %*% result_list[["cov_theta"]] %*% grad))
-    })
+    mu <- drop(result_list[["mu"]])
+    phi <- drop(result_list[["phi"]])
+    grads_beta <- X * (
+      (2*(P-1)*phi*mu^P*(phi*mu^(P-1) + 1) + mu*(phi*mu^(P-1) + 1)^2) /
+        (2 * sqrt(mu * (phi*mu^(P-1) + 1)^2)))
+    grads_phi <- mu^P * sqrt((mu + phi*mu^P)^2 / mu) / (mu + phi*mu^P)
+    grads <- cbind(grads_beta, grads_phi)
+    sd_ses <- sqrt(rowSums((grads %*% result_list[["cov_theta"]]) * grads))
 
     # Create confidence intervals for standard deviations
     result_list[["sd_lower_bounds"]] <- result_list[["sd_estimates"]] - 1.96 * sd_ses
