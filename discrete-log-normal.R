@@ -1,5 +1,5 @@
-library(Matrix)
-library(MASS)
+library(Rcpp)
+sourceCpp("discrete-log-normal-helpers.cpp")
 
 ll_latentnorm <- function(y, X, Z, beta, alpha) {
   mu <- drop(X %*% beta)
@@ -124,6 +124,7 @@ dln <- function(
   q <- ncol(Z)
   beta_idx <- seq(p)
   alpha_idx <- seq(p+1, p+q)
+  thetastart <- c(betastart, alphastart)
   
   # A bunch of helper functions
   get_log_like <- function(beta, alpha) ll_latentnorm(y, X, Z, beta, alpha)
@@ -241,10 +242,42 @@ dln <- function(
   
   # Add results to list
   theta <- c(beta, alpha)
+  names(theta) <- names(thetastart)
   result_list$beta <- beta
   result_list$alpha <- alpha
   result_list$theta <- theta
-
+  hess <- get_hess(beta, alpha)
+  result_list$cov_theta <- chol2inv(chol(-hess))
+  result_list$cov_beta <- result_list$cov_theta[beta_idx, beta_idx]
+  result_list$cov_alpha <- result_list$cov_theta[alpha_idx, alpha_idx]
+  
+  # Fitted values
+  z_mu <- drop(exp(X %*% beta))
+  z_sigma <- drop(exp(Z %*% alpha))
+  result_list$fitted_values <- integrate_dln(z_mu, z_sigma, 1)
+  mean_mu_derivs <- integrate_dln(z_mu, z_sigma, 1, calc_deriv=TRUE, wrt_mu=TRUE)
+  mean_sigma_derivs <- integrate_dln(z_mu, z_sigma, 1, calc_deriv=TRUE, wrt_mu=FALSE)
+  mean_beta_grads <- mean_mu_derivs * z_mu * X
+  mean_alpha_grads <- mean_sigma_derivs * z_sigma * Z
+  mean_theta_grads <- cbind(mean_beta_grads, mean_alpha_grads)
+  fitted_ses <- sqrt(rowSums((mean_theta_grads %*% result_list$cov_theta) * mean_theta_grads))
+  result_list$fitted_lower_bounds <- result_list$fitted_values - 1.96 * fitted_ses
+  result_list$fitted_upper_bounds <- result_list$fitted_values + 1.96 * fitted_ses
+  result_list$fitted_interval_widths <- result_list$fitted_upper_bounds - result_list$fitted_lower_bounds
+  
+  # Standard deviations
+  fitted_second_moments <- integrate_dln(z_mu, z_sigma, 2)
+  result_list$sd_estimates <- fitted_second_moments - result_list$fitted_values^2
+  moment2_mu_derivs <- integrate_dln(z_mu, z_sigma, 2, calc_deriv=TRUE, wrt_mu=TRUE)
+  moment2_sigma_derivs <- integrate_dln(z_mu, z_sigma, 2, calc_deriv=TRUE, wrt_mu=FALSE)
+  sd_beta_grads <- 0.5 * result_list$sd_estimates * (moment2_mu_derivs - 2 * result_list$fitted_values * mean_mu_derivs) * z_mu * X
+  sd_alpha_grads <- 0.5 * result_list$sd_estimates * (moment2_sigma_derivs - 2 * result_list$fitted_values * mean_sigma_derivs) * z_sigma * Z
+  sd_theta_grads <- cbind(sd_beta_grads, sd_alpha_grads)
+  sd_ses <- sqrt(rowSums((sd_theta_grads %*% result_list$cov_theta) * sd_theta_grads))
+  result_list$sd_lower_bounds <- result_list$sd_estimates - 1.96 * sd_ses
+  result_list$sd_upper_bounds <- result_list$sd_estimates + 1.96 * sd_ses
+  result_list$sd_interval_widths <- result_list$sd_upper_bounds - result_list$sd_lower_bounds
+  
   result_list
 }
 
