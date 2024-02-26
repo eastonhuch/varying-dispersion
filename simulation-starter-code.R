@@ -6,23 +6,25 @@ require(scales)
 source("cmp-helpers.R")
 source("gpp.R")
 source("moment-methods.R")
+source("discrete-log-normal.R")
 
 # Generate some data
 set.seed(1)
 n <- 400L
 x1 <- rnorm(n)  # We'll keep the design fixed across simulations
 x2 <- rnorm(n)
-x3 <- rnorm(n)
 
 # NOTE: The mpcmp package is a little temperamental
 # You might run into errors if you make the coefficients much larger
-beta_true <- c(3, 0.05, -0.1)  # Regression coefficients for the mean
-X <- model.matrix(~ x1 + x2)
+beta_true <- c(3, 0.05, -0.1, 0.02)  # Regression coefficients for the mean
+y <- rep(0, n)  # We'll create this later
+master_formula <- y ~ x1*x2
+X <- model.matrix(master_formula)
 log_mu <- c(X %*% beta_true)
 mu <- exp(log_mu)
-alpha_true <- c(0.1, -0.2)  # Not directly comparable across all models
+alpha_true <- c(0.1, 0, -0.2, 0.05)  # Not directly comparable across all models
 # alpha_true <- c(0, 0)  # Equidispersion for fast simulation (e.g., to check for errors)
-Z <- model.matrix(~ x3)  # Determines dispersion; depends only on x3
+Z <- model.matrix(master_formula)
 log_nu <- c(Z %*% alpha_true)
 nu <- exp(log_nu)
 
@@ -40,7 +42,7 @@ phi_method <- "joint"
 stephalving_max <- 10
 
 # Prepare to loop
-reps <- 20L
+reps <- 400L
 method_names <- c("MPCMP", "GP-1", "EPL", "DLN-Newton", "DLN-EM")
 # method_names <- c("GP-1", "EPL")  # Removing a method from the list removes it from the simulation
 num_methods <- length(method_names)
@@ -51,6 +53,8 @@ mu_interval_widths <- mu_estimates
 sd_interval_widths <- mu_estimates
 fitting_times <- matrix(0, nrow=reps, ncol=num_methods, dimnames=list(NULL, method_names))
 fitting_times[] <- NA
+used_score_for_cov <- matrix(FALSE, nrow=reps, ncol=num_methods, dimnames=list(NULL, method_names))
+used_score_for_cov[] <- NA
 
 mu_covered <- array(FALSE, dim=c(n, reps, num_methods), dimnames = list(NULL, NULL, method_names))
 mu_covered[] <- NA
@@ -60,12 +64,12 @@ for (i in seq(reps)) {
   print(i)
   y <- mpcmp::rcomp(n, mu=mu, nu=nu)
   # y <- rpois(n, mu)
-  dat <- data.frame(x1, x2, x3, y)
+  dat <- data.frame(x1, x2, y)
   
   # Fit MPCMP model
   if ("MPCMP" %in% method_names ) try({
     start_time <- Sys.time()
-    mod_cmp <- fit_cmp(y ~ x1 + x2, y ~ x3, data=dat)
+    mod_cmp <- fit_cmp(master_formula, master_formula, data=dat)
     end_time <- Sys.time()
     elapsed_time <- end_time - start_time
     fitting_times[i,"MPCMP"] <- elapsed_time
@@ -80,7 +84,7 @@ for (i in seq(reps)) {
   # Fit GP-P model
   if ("GP-1" %in% method_names ) try({
     start_time <- Sys.time()
-    mod_quasipois <- glm(y ~ x1 + x2, family=quasipoisson(), data=dat)
+    mod_quasipois <- glm(master_formula, family=quasipoisson(), data=dat)
     beta_start <- mod_quasipois$coefficients
     phi_start <- summary(mod_quasipois)$dispersion
     mod_gp1 <- gpp(
@@ -101,7 +105,7 @@ for (i in seq(reps)) {
   # Fit EPL model
   if ("EPL" %in% method_names ) try({
     start_time <- Sys.time()
-    mod_quasipois <- glm(y ~ x1 + x2, family=quasipoisson(), data=dat)
+    mod_quasipois <- glm(master_formula, family=quasipoisson(), data=dat)
     beta_start <- mod_quasipois$coefficients
     alpha_start <- rep(0, ncol(Z))
     names(alpha_start) <- colnames(Z)
@@ -122,7 +126,7 @@ for (i in seq(reps)) {
   # Fit DLN-Newton model
   if ("DLN-Newton" %in% method_names ) try({
     start_time <- Sys.time()
-    mod_quasipois <- glm(y ~ x1 + x2, family=quasipoisson(), data=dat)
+    mod_quasipois <- glm(master_formula, family=quasipoisson(), data=dat)
     beta_start <- mod_quasipois$coefficients
     alpha_start <- rep(0, ncol(Z))
     names(alpha_start) <- colnames(Z)
@@ -132,21 +136,35 @@ for (i in seq(reps)) {
     end_time <- Sys.time()
     elapsed_time <- end_time - start_time
     fitting_times[i,"DLN-Newton"] <- elapsed_time
+    mu_estimates[,i,"DLN-Newton"] <- mod_dln_newton$fitted_values
+    sd_estimates[,i,"DLN-Newton"] <- mod_dln_newton$sd_estimates
+    mu_covered[,i,"DLN-Newton"] <- (mod_dln_newton$fitted_lower_bounds <= mu) & (mu <= mod_dln_newton$fitted_upper_bounds)
+    mu_interval_widths[,i,"DLN-Newton"] <- mod_dln_newton$fitted_interval_widths
+    sd_covered[,i,"DLN-Newton"] <- (mod_dln_newton$sd_lower_bounds <= sd_true) & (sd_true <= mod_dln_newton$sd_upper_bounds)
+    sd_interval_widths[,i,"DLN-Newton"] <- mod_dln_newton$sd_interval_widths
+    used_score_for_cov[i,"DLN-Newton"] <- mod_dln_newton$covariance_via_score
   })
   
   # Fit DLN-EM model
   if ("DLN-EM" %in% method_names ) try({
     start_time <- Sys.time()
-    mod_quasipois <- glm(y ~ x1 + x2, family=quasipoisson(), data=dat)
+    mod_quasipois <- glm(master_formula, family=quasipoisson(), data=dat)
     beta_start <- mod_quasipois$coefficients
     alpha_start <- rep(0, ncol(Z))
     names(alpha_start) <- colnames(Z)
     alpha_start[1] <- log(sqrt(summary(mod_quasipois)$dispersion))
-    mod_dln_newton <- dln(y, X, Z, betastart = beta_start, alphastart = alpha_start, method="EM",
+    mod_dln_em <- dln(y, X, Z, betastart = beta_start, alphastart = alpha_start, method="EM",
                           max_iter=max_iter, stephalving_maxiter=stephalving_max, tol=1e-8, verbose=FALSE)
     end_time <- Sys.time()
     elapsed_time <- end_time - start_time
     fitting_times[i,"DLN-EM"] <- elapsed_time
+    mu_estimates[,i,"DLN-EM"] <- mod_dln_em$fitted_values
+    sd_estimates[,i,"DLN-EM"] <- mod_dln_em$sd_estimates
+    mu_covered[,i,"DLN-EM"] <- (mod_dln_em$fitted_lower_bounds <= mu) & (mu <= mod_dln_em$fitted_upper_bounds)
+    mu_interval_widths[,i,"DLN-EM"] <- mod_dln_em$fitted_interval_widths
+    sd_covered[,i,"DLN-EM"] <- (mod_dln_em$sd_lower_bounds <= sd_true) & (sd_true <= mod_dln_em$sd_upper_bounds)
+    sd_interval_widths[,i,"DLN-EM"] <- mod_dln_em$sd_interval_widths
+    used_score_for_cov[i,"DLN-EM"] <- mod_dln_newton$covariance_via_score
   })
 }
 
@@ -173,6 +191,7 @@ consolidated_results$`Mean: Marginal Coverage` <- format_percent(mu_marginal_cov
 consolidated_results$`Mean: Coverage rMSE` <- format_float(mu_coverage_rMSE)
 
 # SD
+sd_avg <- apply(sd_estimates, MARGIN=c(1,3), mean)
 sd_rmse <- sqrt(apply((sd_estimates - sd_true)^2, MARGIN=c(1,3), mean))
 sd_avg_rmse <- colMeans(sd_rmse)
 sd_observation_coverage <- apply(sd_covered, MARGIN=c(1,3), mean)
@@ -184,6 +203,15 @@ consolidated_results$`SD: Avg rMSE` <- format_float(sd_avg_rmse)
 consolidated_results$`SD: Avg Interval Width` <- format_float(sd_avg_interval_width)
 consolidated_results$`SD: Marginal Coverage` <- format_percent(sd_marginal_coverage)
 consolidated_results$`SD: Coverage rMSE` <- format_float(sd_coverage_rMSE)
+
+# Plot avg SD vs. x2
+sd_order <- order(sd_true)
+plot(x2[sd_order], sd_true[sd_order], xlab=expression(x[3]), ylab="SD", ylim=c(2.5, 7))
+points(x2[sd_order], sd_avg[sd_order, "DLN-Newton"], col=2)
+points(x2[sd_order], sd_avg[sd_order, "MPCMP"], col=3)
+
+# How often did we use score-based covariance?
+colSums(used_score_for_cov)
 
 # Make table pretty
 final_table <- t(consolidated_results)

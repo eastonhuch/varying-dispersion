@@ -134,11 +134,7 @@ epl <- function(y, X, Z, betastart, alphastart, tol=1e-8, max_iter=100, stephalv
   result_list$fitted_values <- mu
   
   # Confidence intervals for fitted values
-  fitted_ses <- sapply(seq(n), function(j) {
-    x <- X[j,]
-    mu[j] * sqrt(c(t(x) %*% result_list$cov_beta %*% x))
-    # NOTE: Need fitted value because we're applying delta method
-  })
+  fitted_ses <- sqrt(rowSums((X %*% result_list$cov_beta) * X)) * mu
   result_list$fitted_lower_bounds <- mu - 1.96 * fitted_ses
   result_list$fitted_upper_bounds <- mu + 1.96 * fitted_ses
   result_list$fitted_interval_widths <- result_list$fitted_upper_bounds - result_list$fitted_lower_bounds
@@ -153,11 +149,8 @@ epl <- function(y, X, Z, betastart, alphastart, tol=1e-8, max_iter=100, stephalv
   
   # Confidence intervals for standard deviations
   W <- cbind(X, Z)
-  sd_ses <- sapply(seq(n), function(j) {
-    w_j <- W[j,]
-    sd_grad <- (0.5) * result_list$sd_estimates[j] * w_j
-    sqrt(c(t(sd_grad) %*% result_list$cov_theta %*% sd_grad))
-  })
+  sd_grads <- result_list$sd_estimates * W
+  sd_ses <- 0.5 * sqrt(rowSums((sd_grads %*% result_list$cov_theta) * sd_grads))
   result_list$sd_lower_bounds <- result_list$sd_estimates - 1.96 * sd_ses
   result_list$sd_upper_bounds <- result_list$sd_estimates + 1.96 * sd_ses
   result_list$sd_interval_widths <- result_list$sd_upper_bounds - result_list$sd_lower_bounds

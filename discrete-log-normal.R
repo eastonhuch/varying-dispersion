@@ -1,5 +1,5 @@
-library(Matrix)
-library(MASS)
+library(Rcpp)
+sourceCpp("discrete-log-normal-helpers.cpp")
 
 ll_latentnorm <- function(y, X, Z, beta, alpha) {
   mu <- drop(X %*% beta)
@@ -124,16 +124,22 @@ dln <- function(
   q <- ncol(Z)
   beta_idx <- seq(p)
   alpha_idx <- seq(p+1, p+q)
+  thetastart <- c(betastart, alphastart)
   
   # A bunch of helper functions
   get_log_like <- function(beta, alpha) ll_latentnorm(y, X, Z, beta, alpha)
   get_dev <- function(beta, alpha) -2 * get_log_like(beta, alpha)  # Doesn't include additive factor for saturated model
 
-  get_grad <- function(beta, alpha) {
+  get_grad_matrix <- function(beta, alpha) {
     gradutils_result <- gradutils(y, X, Z, beta, alpha)
-    grad_beta <- -colMeans(gradutils_result$kappa_0 / gradutils_result$sigma * X)
-    grad_alpha <- -colMeans(gradutils_result$kappa_1 * Z)
-    c(grad_beta, grad_alpha)
+    grad_beta <- -gradutils_result$kappa_0 / gradutils_result$sigma * X
+    grad_alpha <- -gradutils_result$kappa_1 * Z
+    cbind(grad_beta, grad_alpha)
+  }
+  
+  get_grad <- function(beta, alpha) {
+    grad_matrix <- get_grad_matrix(beta, alpha)
+    colMeans(grad_matrix)
   }
   
   get_hess <- function(beta, alpha) {
@@ -241,19 +247,65 @@ dln <- function(
   
   # Add results to list
   theta <- c(beta, alpha)
+  names(theta) <- names(thetastart)
   result_list$beta <- beta
   result_list$alpha <- alpha
   result_list$theta <- theta
-
+  
+  # Covariance matrix
+  # Estimate based on observed information
+  result_list$covariance_via_score <- FALSE
+  hess <- get_hess(beta, alpha)
+  try({result_list$cov_theta <- chol2inv(chol(-hess)) / n}, silent=TRUE)
+  
+  # Estimate based on score function: This one is (almost) always invertible
+  if (is.null(result_list$cov_theta)) {
+    result_list$covariance_via_score <- TRUE
+    grad_matrix <- get_grad_matrix(beta, alpha)
+    result_list$cov_theta <- chol2inv(chol(crossprod(grad_matrix)))
+  }
+  
+  # Store individual covariance matrices
+  result_list$cov_beta <- result_list$cov_theta[beta_idx, beta_idx]
+  result_list$cov_alpha <- result_list$cov_theta[alpha_idx, alpha_idx]
+  
+  # Fitted values
+  z_mu <- drop(X %*% beta)
+  z_sigma <- drop(exp(Z %*% alpha))
+  result_list$fitted_values <- integrate_dln(z_mu, z_sigma, 1)
+  mean_mu_derivs <- integrate_dln(z_mu, z_sigma, 1, calc_deriv=TRUE, wrt_mu=TRUE)
+  mean_sigma_derivs <- integrate_dln(z_mu, z_sigma, 1, calc_deriv=TRUE, wrt_mu=FALSE)
+  mean_beta_grads <- mean_mu_derivs * X
+  mean_alpha_grads <- mean_sigma_derivs * z_sigma * Z
+  mean_theta_grads <- cbind(mean_beta_grads, mean_alpha_grads)
+  fitted_ses <- sqrt(rowSums((mean_theta_grads %*% result_list$cov_theta) * mean_theta_grads))
+  result_list$fitted_lower_bounds <- result_list$fitted_values - 1.96 * fitted_ses
+  result_list$fitted_upper_bounds <- result_list$fitted_values + 1.96 * fitted_ses
+  result_list$fitted_interval_widths <- result_list$fitted_upper_bounds - result_list$fitted_lower_bounds
+  
+  # Standard deviations
+  fitted_second_moments <- integrate_dln(z_mu, z_sigma, 2)
+  var_estimates <- fitted_second_moments - result_list$fitted_values^2
+  result_list$sd_estimates <- sqrt(var_estimates)
+  moment2_mu_derivs <- integrate_dln(z_mu, z_sigma, 2, calc_deriv=TRUE, wrt_mu=TRUE)
+  moment2_sigma_derivs <- integrate_dln(z_mu, z_sigma, 2, calc_deriv=TRUE, wrt_mu=FALSE)
+  sd_beta_grads <- 1 / (2 * result_list$sd_estimates) * (moment2_mu_derivs - 2 * result_list$fitted_values * mean_mu_derivs) * X
+  sd_alpha_grads <- 1 / (2 * result_list$sd_estimates) * (moment2_sigma_derivs - 2 * result_list$fitted_values * mean_sigma_derivs) * z_sigma * Z
+  sd_theta_grads <- cbind(sd_beta_grads, sd_alpha_grads)
+  sd_ses <- sqrt(rowSums((sd_theta_grads %*% result_list$cov_theta) * sd_theta_grads))
+  result_list$sd_lower_bounds <- result_list$sd_estimates - 1.96 * sd_ses
+  result_list$sd_upper_bounds <- result_list$sd_estimates + 1.96 * sd_ses
+  result_list$sd_interval_widths <- result_list$sd_upper_bounds - result_list$sd_lower_bounds
+  
   result_list
 }
 
-mod_dln_newton <- dln(y, X, Z, beta_start, alpha_start, method="Newton", max_iter=100, stephalving_maxiter=10, tol=1e-16, verbose=TRUE)
-mod_dln_em <- dln(y, X, Z, beta_start, alpha_start, method="EM", max_iter=100, stephalving_maxiter=10, tol=1e-16, verbose=TRUE)
+# mod_dln_newton <- dln(y, X, Z, beta_start, alpha_start, method="Newton", max_iter=100, stephalving_maxiter=10, tol=1e-16, verbose=TRUE)
+# mod_dln_em <- dln(y, X, Z, beta_start, alpha_start, method="EM", max_iter=100, stephalving_maxiter=10, tol=1e-16, verbose=TRUE)
 
 # Same estimates!!!
-mod_dln_newton$theta
-mod_dln_em$theta
+# mod_dln_newton$theta
+# mod_dln_em$theta
 
 # Use this for testing
 # betastart <- beta_start
