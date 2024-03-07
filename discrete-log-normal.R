@@ -1,7 +1,9 @@
 require(Rcpp)
 require(MASS)
+require(mvtnorm)
 sourceCpp("discrete-log-normal-helpers.cpp")
 
+# Note: this is the average log-likelihood
 ll_latentnorm <- function(y, X, Z, beta, alpha) {
   mu <- drop(X %*% beta)
   sigma <- exp(drop(Z %*% alpha))
@@ -116,6 +118,7 @@ em_gradutils <- function(Z, sigma, v, alpha) {
 
 dln <- function(
   y, X, Z, betastart, alphastart, method="Newton", pred_interval_method=NULL,
+  prior_mean=NULL, prior_precision=NULL, # NOTE: These are only used for pred intervals with Full Bayes
   max_iter = 100, stephalving_maxiter=10, tol=1e-8, verbose=TRUE) {
   
   # Initialize some values
@@ -129,8 +132,19 @@ dln <- function(
   
   # A bunch of helper functions
   get_log_like <- function(beta, alpha) ll_latentnorm(y, X, Z, beta, alpha)
-  get_log_like_theta <- function(theta) get_log_like(theta[beta_idx], theta[alpha_idx])
-  get_dev <- function(beta, alpha) -2 * get_log_like(beta, alpha)  # Doesn't include additive factor for saturated model
+  get_sum_log_like_theta <- function(theta) {
+    log_like <- tryCatch(
+      n * get_log_like(theta[beta_idx], theta[alpha_idx]),
+      error=function(e) -Inf
+    ) 
+  }
+  get_dev <- function(beta, alpha) {
+    # Doesn't include additive factor for saturated model
+    dev <- tryCatch(
+      -2 * get_log_like(beta, alpha),
+      error=function(e) Inf)
+    dev
+  }
 
   get_grad_matrix <- function(beta, alpha) {
     gradutils_result <- gradutils(y, X, Z, beta, alpha)
@@ -310,22 +324,33 @@ dln <- function(
     bounds <- cbind(lower_bounds, upper_bounds)
     bounds
   }
-  if (pred_interval_method  == "Approx. Bayes") {
+  if (pred_interval_method  == "Asymp. Bayes") {
     n_samples <- 400  # Could add this as param
     theta_samples <- mvrnorm(n_samples, result_list$theta, result_list$cov_theta)
     bounds <- get_bayes_bounds(theta_samples)
     raw_pred_lower_bounds <- bounds[,1]
     raw_pred_upper_bounds <- bounds[,2]
   } else if (pred_interval_method  == "Full Bayes") {
-    n_init_samples <- 2000  # Could add this as a param
+    n_init_samples <- 10000  # Could add this as a param
     n_samples <- 400  # Could add this as param
-    theta_init_samples <- mvrnorm(n_init_samples, result_list$theta, result_list$cov_theta)
-    ll_samples <- apply(theta_init_samples, 1, get_log_like_theta)
-    l_samples <- exp(ll_samples)
-    l_samples[is.na(l_samples)] <- 0
-    l_samples[is.infinite(l_samples)] <- 0
-    l_samples <- l_samples / sum(l_samples)
-    sample_idx <- sample(seq(n_init_samples), size=n_samples, replace=FALSE, prob=l_samples)
+    precision_theta <- chol2inv(chol(result_list$cov_theta))
+    theta_post_precision <- prior_precision + precision_theta
+    theta_post_cov <- chol2inv(chol(theta_post_precision))
+    theta_post_mean <- c(theta_post_cov %*% (
+      prior_precision %*% prior_mean + 
+      precision_theta %*% result_list$theta))
+
+    theta_init_samples_centered <- rmvt(n_init_samples, theta_post_cov, df=5)
+    ld_proposal_samples <- dmvt(theta_init_samples_centered, sigma=theta_post_cov, df=5, log=TRUE)
+    theta_init_samples <- t(theta_post_mean + t(theta_init_samples_centered))
+    ll_samples <- apply(theta_init_samples, 1, get_sum_log_like_theta)
+    lprior_samples <- dmvnorm(theta_init_samples, theta_prior_mean, theta_prior_cov, log=TRUE)
+    ld_samples <- lprior_samples + ll_samples - ld_proposal_samples
+    ll_samples[!is.finite(ll_samples)] <- -Inf
+    d_samples <- exp(ld_samples - mean(ld_samples[is.finite(ld_samples)]))
+    d_samples[!is.finite(d_samples)] <- 0
+    d_samples <- d_samples / sum(d_samples)
+    sample_idx <- sample(seq(n_init_samples), size=n_samples, replace=TRUE, prob=d_samples)
     theta_samples <- theta_init_samples[sample_idx,]
     bounds <- get_bayes_bounds(theta_samples)
     raw_pred_lower_bounds <- bounds[,1]
@@ -336,10 +361,10 @@ dln <- function(
     raw_pred_lower_bounds <- floor(exp(z_mu - 1.96 * pred_se))
     raw_pred_upper_bounds <- floor(exp(z_mu + 1.96 * pred_se))
   } else if (! is.null(pred_interval_method)) {
-    stop("pred_interval_method must be `Approx. Bayes`, `Full Bayes`, or `Plug-in`")
+    stop("pred_interval_method must be `Asymp. Bayes`, `Full Bayes`, or `Plug-in`")
   }
-  result_list$pred_lower_bounds <- floor(raw_pred_lower_bounds)
-  result_list$pred_upper_bounds <- ceiling(raw_pred_upper_bounds)
+  result_list$pred_lower_bounds <- round(raw_pred_lower_bounds)
+  result_list$pred_upper_bounds <- round(raw_pred_upper_bounds)
   result_list$pred_interval_widths <- result_list$pred_upper_bounds - result_list$pred_lower_bounds
   
   result_list

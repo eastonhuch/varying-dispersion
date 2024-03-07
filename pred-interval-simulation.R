@@ -1,5 +1,7 @@
 # devtools::install_github("SuneelChatla/cmp")
 # devtools::install_github("thomas-fung/mpcmp") 
+require(MASS)
+require(tidyverse)
 require(mpcmp)
 require(cmp)
 require(scales)
@@ -7,10 +9,25 @@ source("discrete-log-normal.R")
 
 # Set parameters
 set.seed(1)
-beta_true <- c(4, 0.05)
-alpha_true <- c(0, 0) # Setting this to zero so that we can simulate faster
 master_formula <- y ~ x1
+y <- x1 <- rep(0, 10)  # Just for calculating p
+Z <- X <- model.matrix(master_formula)
+p <- ncol(X)
+beta_idx <- seq(p)
+alpha_idx <- p + beta_idx
 nominal_coverage <- 0.95  # This is hard-coded in the model-fitting functions
+beta_intercept_prior_mean <- 4
+alpha_intercept_prior_mean <- -1
+theta_prior_mean <- rep(0, 2*p)
+theta_prior_mean[1] <- beta_intercept_prior_mean
+theta_prior_mean[p+1] <- alpha_intercept_prior_mean
+
+intercept_prior_sd <- 0.2
+coef_prior_sd <- 0.05
+theta_prior_precision <- diag(2*p) * coef_prior_sd^(-2)
+theta_prior_precision[1, 1] <- intercept_prior_sd^(-2)
+theta_prior_precision[p+1, p+1] <- intercept_prior_sd^(-2)
+theta_prior_cov <- chol2inv(chol(theta_prior_precision))
 
 # Control parameters
 tol <- 1e-8
@@ -19,39 +36,45 @@ phi_method <- "joint"
 stephalving_max <- 10
 
 # Arrays for results
-n_vals <- c(10L, 25L, 100L, 400L)
+n_vals <- c(10, 30L)#, 100L)
 num_n_vals <- length(n_vals)
 reps <- 100L
-method_names <- c("Plug-in", "Approx. Bayes", "Full Bayes")
+n_bootstraps <- 100L
+method_names <- c("Plug-in", "Asymp. Bayes", "Full Bayes")
 num_methods <- length(method_names)
 
 marginal_coverages <- matrix(0, nrow=num_n_vals, ncol=num_methods, dimnames = list(n_vals, method_names))
 marginal_coverages[] <- NA
 marginal_coverage_ses <- marginal_coverages
 coverage_rmses <- marginal_coverages
+coverage_rmses_ses <- marginal_coverages
 interval_widths <- marginal_coverages
 interval_width_ses <- marginal_coverages
 interval_width_medians <- marginal_coverages
+interval_width_medians_ses <- marginal_coverages
+
+# Starting values
+beta_start <- theta_prior_mean[beta_idx]
+names(beta_start) <- colnames(X)
+alpha_start <- theta_prior_mean[alpha_idx]
+names(alpha_start) <- colnames(Z)
 
 # Loop
 for (n in n_vals) {
   cat("n: ", n, "\n")
   
   # Create data
+  theta_true <- mvrnorm(1, theta_prior_mean, theta_prior_cov)
+  beta_true <- theta_true[beta_idx]
+  alpha_true <- theta_true[alpha_idx]
   x1 <- rnorm(n)  # We'll keep the design fixed across simulations
+  x2 <- x1 + rnorm(n, sd=0.05)
   y <- rep(0, n)  # We'll create this later
   X <- model.matrix(master_formula)
-  log_mu <- c(X %*% beta_true)
-  mu <- exp(log_mu)
+  z_mu <- c(X %*% beta_true)
   Z <- model.matrix(master_formula)
-  log_nu <- c(Z %*% alpha_true)
-  nu <- exp(log_nu)
-  lambda <- comp_lambdas(mu, nu)$lambda  # Helper from mpcmp
-  # This calls a C function from the cmp package that efficiently calculates the moments
-  var_true <- .C(
-    "cmp_cum_all", llambda=as.double(log(lambda)), lnu=as.double(log_nu),
-    flag=as.double(1L), n=as.integer(n), mean=rep(0, n), var=rep(0, n))$var
-  sd_true <- sqrt(var_true)  # True standard deviation that we're trying to estimate
+  z_sigma <- c(exp(Z %*% alpha_true))
+  
   y_star_covered <- array(FALSE, dim=c(n, reps, num_methods), dimnames = list(NULL, NULL, method_names))
   y_star_covered[] <- NA
   y_star_interval_widths <- array(0, dim=c(n, reps, num_methods), dimnames = list(NULL, NULL, method_names))
@@ -59,21 +82,14 @@ for (n in n_vals) {
   
   for (i in seq(reps)) {
     print(i)
-    # y <- mpcmp::rcomp(n, mu=mu, nu=nu)
-    # y_star <- mpcmp::rcomp(n, mu=mu, nu=nu)
-    y <- rpois(n, mu)
-    y_star <- rpois(n, mu)
+    y <- floor(exp(rnorm(n, mean=z_mu, sd=z_sigma)))
+    y_star <- floor(exp(rnorm(n, mean=z_mu, sd=z_sigma)))
     dat <- data.frame(x1, y)
     
     # Plug-in Method
     if ("Plug-in" %in% method_names ) try({
       # Fit model
-      mod_quasipois <- glm(master_formula, family=quasipoisson(), data=dat)
-      beta_start <- mod_quasipois$coefficients
-      alpha_start <- rep(0, ncol(Z))
-      names(alpha_start) <- colnames(Z)
-      alpha_start[1] <- log(sqrt(summary(mod_quasipois)$dispersion))
-      mod_plug_in <- dln(y, X, Z, betastart = beta_start, alphastart = alpha_start, method="EM", pred_interval_method="Plug-in",
+      mod_plug_in <- dln(y, X, Z, betastart = beta_start, alphastart = alpha_start, method="Newton", pred_interval_method="Plug-in",
                         max_iter=max_iter, stephalving_maxiter=stephalving_max, tol=1e-8, verbose=FALSE)
       
       # Store results
@@ -81,65 +97,89 @@ for (n in n_vals) {
       y_star_interval_widths[,i,"Plug-in"] <- mod_plug_in$pred_interval_widths
     })
     
-    # Approx. Bayes method
-    if ("Approx. Bayes" %in% method_names ) try({
+    # Asymp. Bayes method
+    if ("Asymp. Bayes" %in% method_names ) try({
       # Fit model
-      mod_quasipois <- glm(master_formula, family=quasipoisson(), data=dat)
-      beta_start <- mod_quasipois$coefficients
-      alpha_start <- rep(0, ncol(Z))
-      names(alpha_start) <- colnames(Z)
-      alpha_start[1] <- log(sqrt(summary(mod_quasipois)$dispersion))
-      mod_bayes <- dln(y, X, Z, betastart = beta_start, alphastart = alpha_start, method="EM", pred_interval_method="Approx. Bayes",
+      mod_approx_bayes <- dln(y, X, Z, betastart = beta_start, alphastart = alpha_start, method="Newton", pred_interval_method="Asymp. Bayes",
                          max_iter=max_iter, stephalving_maxiter=stephalving_max, tol=1e-8, verbose=FALSE)
       
       # Store results
-      y_star_covered[,i,"Approx. Bayes"] <- (mod_bayes$pred_lower_bounds <= y_star) & (y_star <= mod_bayes$pred_upper_bounds)
-      y_star_interval_widths[,i,"Approx. Bayes"] <- mod_bayes$pred_interval_widths
+      y_star_covered[,i,"Asymp. Bayes"] <- (mod_approx_bayes$pred_lower_bounds <= y_star) & (y_star <= mod_approx_bayes$pred_upper_bounds)
+      y_star_interval_widths[,i,"Asymp. Bayes"] <- mod_approx_bayes$pred_interval_widths
     })
     
     # Full Bayes method
     if ("Full Bayes" %in% method_names ) try({
       # Fit model
-      mod_quasipois <- glm(master_formula, family=quasipoisson(), data=dat)
-      beta_start <- mod_quasipois$coefficients
-      alpha_start <- rep(0, ncol(Z))
-      names(alpha_start) <- colnames(Z)
-      alpha_start[1] <- log(sqrt(summary(mod_quasipois)$dispersion))
-      mod_bayes <- dln(y, X, Z, betastart = beta_start, alphastart = alpha_start, method="EM", pred_interval_method="Full Bayes",
-                       max_iter=max_iter, stephalving_maxiter=stephalving_max, tol=1e-8, verbose=FALSE)
+      mod_full_bayes <- dln(y, X, Z, betastart = beta_start, alphastart = alpha_start, method="Newton", pred_interval_method="Full Bayes",
+                            prior_mean=theta_prior_mean, prior_precision=theta_prior_precision,
+                            max_iter=max_iter, stephalving_maxiter=stephalving_max, tol=1e-8, verbose=FALSE)
       
       # Store results
-      y_star_covered[,i,"Full Bayes"] <- (mod_bayes$pred_lower_bounds <= y_star) & (y_star <= mod_bayes$pred_upper_bounds)
-      y_star_interval_widths[,i,"Full Bayes"] <- mod_bayes$pred_interval_widths
+      y_star_covered[,i,"Full Bayes"] <- (mod_full_bayes$pred_lower_bounds <= y_star) & (y_star <= mod_full_bayes$pred_upper_bounds)
+      y_star_interval_widths[,i,"Full Bayes"] <- mod_full_bayes$pred_interval_widths
     })
   }
   
   # Marginal coverage
-  rep_coverage <- apply(y_star_covered, MARGIN=c(2,3), mean)
-  marginal_coverages[as.character(n),] <- colMeans(rep_coverage)
-  marginal_coverage_ses[as.character(n),] <- apply(rep_coverage, 2, sd) / sqrt(n)
+  rep_coverage <- apply(y_star_covered, MARGIN=c(2,3), function(x) mean(x, na.rm=TRUE))
+  marginal_coverages[as.character(n),] <- colMeans(rep_coverage, na.rm=TRUE)
+  marginal_coverage_ses[as.character(n),] <- apply(rep_coverage, 2, function(x) sd(x, na.rm=TRUE)) / sqrt(reps)
   
   # Coverage rMSE
-  observation_coverage <- apply(y_star_covered, MARGIN=c(1,3), mean)
-  coverage_rmses[as.character(n),] <- sqrt(colMeans((observation_coverage - nominal_coverage)^2))
+  observation_coverage <- apply(y_star_covered, MARGIN=c(1,3), function(x) mean(x, na.rm=TRUE))
+  coverage_rmses[as.character(n),] <- sqrt(colMeans((observation_coverage - nominal_coverage)^2, na.rm=TRUE))
+  coverage_rmses_ses[as.character(n),] <- apply(y_star_covered, MARGIN=3, function(M) {
+    bootstrap_coverage_rmses <- rep(0, n_bootstraps)
+    for (j in seq(n_bootstraps)) {
+      M_boot <- M[,sample(ncol(M), replace=TRUE)]
+      bootstrap_observation_coverages <- rowMeans(M_boot)
+      bootstrap_coverage_rmses[j] <- sqrt(mean((bootstrap_observation_coverages - nominal_coverage)^2))
+    }
+    sd(bootstrap_coverage_rmses)
+  })
   
   # Interval widths
-  rep_interval_widths <- apply(y_star_interval_widths, MARGIN=c(2,3), mean)
-  interval_widths[as.character(n),] <- colMeans(rep_interval_widths)
-  interval_width_ses[as.character(n),] <- apply(rep_interval_widths, 2, sd) / sqrt(n)
-  interval_width_medians[as.character(n),] <- apply(y_star_interval_widths, MARGIN=c(3), median)
+  # rep_interval_widths <- apply(y_star_interval_widths, MARGIN=c(2,3), function(x) mean(x, na.rm=TRUE))
+  # interval_widths[as.character(n),] <- colMeans(rep_interval_widths, na.rm=TRUE)
+  # interval_width_ses[as.character(n),] <- apply(rep_interval_widths, 2, function(x) sd(x, na.rm=TRUE)) / sqrt(reps)
+  rep_interval_width_medians <- apply(y_star_interval_widths, MARGIN=c(2,3), function(x) median(x, na.rm=TRUE))
+  interval_width_medians[as.character(n),] <- apply(rep_interval_width_medians, 2, function(x) median(x, na.rm=TRUE))
+  interval_width_medians_ses[as.character(n),] <- apply(rep_interval_width_medians, 2, function(x) {
+    x_boot <- x
+    medians <- rep(0, n_bootstraps)
+    for (j in seq(n_bootstraps)) {
+      x_boot <- x[sample(length(x), replace=TRUE)]
+      medians[j] <- median(x_boot)
+    }
+    sd(medians)
+  })
 }
-
-# Check results quickly
-marginal_coverages
-coverage_rmses
-interval_widths
-interval_width_medians
 
 # Display results
 format_float <- label_number(0.001)
 format_percent <- label_percent(0.1)
+result_df <- data.frame(n_vals)
 
-marginal_coverages_text <- paste0(format_float(marginal_coverages), "(", format_float(marginal_coverage_ses), ")")
-interval_widths_text <- paste0(format_float(interval_widths), "(", format_float(interval_width_ses), ")")
+# Marginal Coverage
+for (method_name in method_names) {
+  result_df <- result_df %>% mutate(
+    !!(paste0(method_name, ": Marginal Coverage")) := paste0(format_float(marginal_coverages[,method_name]), " (", format_float(marginal_coverage_ses[,method_name]), ")")
+  )
+}
 
+# Coverage rMSE
+for (method_name in method_names) {
+  result_df <- result_df %>% mutate(
+    !!(paste0(method_name, ": Coverage rMSE")) := paste0(format_float(coverage_rmses[,method_name]), " (", format_float(coverage_rmses_ses[,method_name]), ")")
+  )
+}
+
+# Interval Length
+for (method_name in method_names) {
+  result_df <- result_df %>% mutate(
+    !!(paste0(method_name, ": Median Interval Length")) := paste0(format_float(interval_width_medians[,method_name]), " (", format_float(interval_width_medians_ses[,method_name]), ")")
+  )
+}
+
+View(result_df)
