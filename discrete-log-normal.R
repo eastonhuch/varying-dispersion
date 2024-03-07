@@ -1,4 +1,5 @@
-library(Rcpp)
+require(Rcpp)
+require(MASS)
 sourceCpp("discrete-log-normal-helpers.cpp")
 
 ll_latentnorm <- function(y, X, Z, beta, alpha) {
@@ -114,7 +115,7 @@ em_gradutils <- function(Z, sigma, v, alpha) {
 }
 
 dln <- function(
-  y, X, Z, betastart, alphastart, method="Newton",
+  y, X, Z, betastart, alphastart, method="Newton", pred_interval_method=NULL,
   max_iter = 100, stephalving_maxiter=10, tol=1e-8, verbose=TRUE) {
   
   # Initialize some values
@@ -128,6 +129,7 @@ dln <- function(
   
   # A bunch of helper functions
   get_log_like <- function(beta, alpha) ll_latentnorm(y, X, Z, beta, alpha)
+  get_log_like_theta <- function(theta) get_log_like(theta[beta_idx], theta[alpha_idx])
   get_dev <- function(beta, alpha) -2 * get_log_like(beta, alpha)  # Doesn't include additive factor for saturated model
 
   get_grad_matrix <- function(beta, alpha) {
@@ -296,6 +298,49 @@ dln <- function(
   result_list$sd_lower_bounds <- result_list$sd_estimates - 1.96 * sd_ses
   result_list$sd_upper_bounds <- result_list$sd_estimates + 1.96 * sd_ses
   result_list$sd_interval_widths <- result_list$sd_upper_bounds - result_list$sd_lower_bounds
+  
+  # Prediction intervals
+  get_bayes_bounds <- function(t_samples) {
+    beta_samples <- t_samples[,beta_idx]
+    alpha_samples <- t_samples[,alpha_idx]
+    Z <- X %*% t(beta_samples) + exp(Z %*% t(alpha_samples)) * matrix(rnorm(n*n_samples), nrow=n, ncol=n_samples)
+    Y <- floor(exp(Z))
+    lower_bounds <- apply(Y, 1, function(v) quantile(v, probs=0.025))
+    upper_bounds <- apply(Y, 1, function(v) quantile(v, probs=0.975))
+    bounds <- cbind(lower_bounds, upper_bounds)
+    bounds
+  }
+  if (pred_interval_method  == "Approx. Bayes") {
+    n_samples <- 400  # Could add this as param
+    theta_samples <- mvrnorm(n_samples, result_list$theta, result_list$cov_theta)
+    bounds <- get_bayes_bounds(theta_samples)
+    raw_pred_lower_bounds <- bounds[,1]
+    raw_pred_upper_bounds <- bounds[,2]
+  } else if (pred_interval_method  == "Full Bayes") {
+    n_init_samples <- 2000  # Could add this as a param
+    n_samples <- 400  # Could add this as param
+    theta_init_samples <- mvrnorm(n_init_samples, result_list$theta, result_list$cov_theta)
+    ll_samples <- apply(theta_init_samples, 1, get_log_like_theta)
+    l_samples <- exp(ll_samples)
+    l_samples[is.na(l_samples)] <- 0
+    l_samples[is.infinite(l_samples)] <- 0
+    l_samples <- l_samples / sum(l_samples)
+    sample_idx <- sample(seq(n_init_samples), size=n_samples, replace=FALSE, prob=l_samples)
+    theta_samples <- theta_init_samples[sample_idx,]
+    bounds <- get_bayes_bounds(theta_samples)
+    raw_pred_lower_bounds <- bounds[,1]
+    raw_pred_upper_bounds <- bounds[,2]
+  } else if (pred_interval_method == "Plug-in") {
+    XSigmaXt_diag <- rowSums((X %*% result_list$cov_beta) * X)
+    pred_se <- sqrt(z_sigma^2 + XSigmaXt_diag)
+    raw_pred_lower_bounds <- floor(exp(z_mu - 1.96 * pred_se))
+    raw_pred_upper_bounds <- floor(exp(z_mu + 1.96 * pred_se))
+  } else if (! is.null(pred_interval_method)) {
+    stop("pred_interval_method must be `Approx. Bayes`, `Full Bayes`, or `Plug-in`")
+  }
+  result_list$pred_lower_bounds <- floor(raw_pred_lower_bounds)
+  result_list$pred_upper_bounds <- ceiling(raw_pred_upper_bounds)
+  result_list$pred_interval_widths <- result_list$pred_upper_bounds - result_list$pred_lower_bounds
   
   result_list
 }
