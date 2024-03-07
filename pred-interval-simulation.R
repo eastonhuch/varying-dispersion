@@ -36,7 +36,7 @@ phi_method <- "joint"
 stephalving_max <- 10
 
 # Arrays for results
-n_vals <- c(10, 30L)#, 100L)
+n_vals <- c(10, 30L, 100L)
 num_n_vals <- length(n_vals)
 reps <- 100L
 n_bootstraps <- 100L
@@ -64,16 +64,11 @@ for (n in n_vals) {
   cat("n: ", n, "\n")
   
   # Create data
-  theta_true <- mvrnorm(1, theta_prior_mean, theta_prior_cov)
-  beta_true <- theta_true[beta_idx]
-  alpha_true <- theta_true[alpha_idx]
   x1 <- rnorm(n)  # We'll keep the design fixed across simulations
   x2 <- x1 + rnorm(n, sd=0.05)
   y <- rep(0, n)  # We'll create this later
   X <- model.matrix(master_formula)
-  z_mu <- c(X %*% beta_true)
   Z <- model.matrix(master_formula)
-  z_sigma <- c(exp(Z %*% alpha_true))
   
   y_star_covered <- array(FALSE, dim=c(n, reps, num_methods), dimnames = list(NULL, NULL, method_names))
   y_star_covered[] <- NA
@@ -82,6 +77,11 @@ for (n in n_vals) {
   
   for (i in seq(reps)) {
     print(i)
+    theta_true <- mvrnorm(1, theta_prior_mean, theta_prior_cov)
+    beta_true <- theta_true[beta_idx]
+    alpha_true <- theta_true[alpha_idx]
+    z_mu <- c(X %*% beta_true)
+    z_sigma <- c(exp(Z %*% alpha_true))
     y <- floor(exp(rnorm(n, mean=z_mu, sd=z_sigma)))
     y_star <- floor(exp(rnorm(n, mean=z_mu, sd=z_sigma)))
     dat <- data.frame(x1, y)
@@ -146,7 +146,6 @@ for (n in n_vals) {
   rep_interval_width_medians <- apply(y_star_interval_widths, MARGIN=c(2,3), function(x) median(x, na.rm=TRUE))
   interval_width_medians[as.character(n),] <- apply(rep_interval_width_medians, 2, function(x) median(x, na.rm=TRUE))
   interval_width_medians_ses[as.character(n),] <- apply(rep_interval_width_medians, 2, function(x) {
-    x_boot <- x
     medians <- rep(0, n_bootstraps)
     for (j in seq(n_bootstraps)) {
       x_boot <- x[sample(length(x), replace=TRUE)]
