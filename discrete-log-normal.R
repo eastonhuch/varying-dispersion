@@ -118,7 +118,7 @@ em_gradutils <- function(Z, sigma, v, alpha) {
 }
 
 dln <- function(
-  y, X, Z, betastart, alphastart, method="Newton", pred_interval_method=NULL,
+  y, X, Z, betastart, alphastart, method="Newton", pred_interval_method="None",
   prior_mean=NULL, prior_precision=NULL, # NOTE: These are only used for pred intervals with Full Bayes
   max_iter = 100, stephalving_maxiter=10, tol=1e-8, verbose=TRUE) {
   
@@ -315,6 +315,7 @@ dln <- function(
   result_list$sd_interval_widths <- result_list$sd_upper_bounds - result_list$sd_lower_bounds
   
   # Prediction intervals
+  use_pred_intervals <- TRUE
   get_bayes_bounds <- function(t_samples) {
     beta_samples <- t_samples[,beta_idx]
     alpha_samples <- t_samples[,alpha_idx]
@@ -361,12 +362,18 @@ dln <- function(
     pred_se <- sqrt(z_sigma^2 + XSigmaXt_diag)
     raw_pred_lower_bounds <- floor(exp(z_mu - 1.96 * pred_se))
     raw_pred_upper_bounds <- floor(exp(z_mu + 1.96 * pred_se))
-  } else if (! is.null(pred_interval_method)) {
+  } else if (pred_interval_method == "None") {
+    use_pred_intervals <- FALSE
+  } else {
     stop("pred_interval_method must be `Asymp. Bayes`, `Full Bayes`, or `Plug-in`")
   }
-  result_list$pred_lower_bounds <- round(raw_pred_lower_bounds)
-  result_list$pred_upper_bounds <- round(raw_pred_upper_bounds)
-  result_list$pred_interval_widths <- result_list$pred_upper_bounds - result_list$pred_lower_bounds
+  
+  # Save prediction intervals
+  if (use_pred_intervals) {
+    result_list$pred_lower_bounds <- round(raw_pred_lower_bounds)
+    result_list$pred_upper_bounds <- round(raw_pred_upper_bounds)
+    result_list$pred_interval_widths <- result_list$pred_upper_bounds - result_list$pred_lower_bounds
+  }
   
   result_list
 }
