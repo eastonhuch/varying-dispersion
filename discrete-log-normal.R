@@ -319,20 +319,36 @@ dln <- function(
     alpha_samples <- t_samples[,alpha_idx]
     Z <- X %*% t(beta_samples) + exp(Z %*% t(alpha_samples)) * matrix(rnorm(n*n_samples), nrow=n, ncol=n_samples)
     Y <- floor(exp(Z))
-    lower_bounds <- apply(Y, 1, function(v) quantile(v, probs=0.025))
+    
+    # Lower bounds
+    raw_lower_bounds <- apply(Y, 1, function(v) quantile(v, probs=0.025))
+    floor_lower_bounds <- floor(raw_lower_bounds)
+    floor_lower_probs <- rowMeans(Y < floor_lower_bounds)
+    ceiling_lower_bounds <- ceiling(raw_lower_bounds)
+    ceiling_lower_probs <- rowMeans(Y < ceiling_lower_bounds)
+    lower_probs_diff <- ceiling_lower_probs - floor_lower_probs
+    print(min(lower_probs_diff))
+    ceiling_lower_prob <- (0.025 - floor_lower_probs) / lower_probs_diff
+    ceiling_lower_prob[!is.finite(ceiling_lower_prob)] <- 1
+    # hist(ceiling_lower_prob)
+    lower_use_ceiling <- runif(n) < ceiling_lower_prob
+    lower_bounds <- lower_use_ceiling * ceiling_lower_bounds + (!lower_use_ceiling) * floor_lower_bounds
+    # print(lower_bounds - raw_lower_bounds)
+
+    # Upper bounds
     upper_bounds <- apply(Y, 1, function(v) quantile(v, probs=0.975))
     bounds <- cbind(lower_bounds, upper_bounds)
     bounds
   }
   if (pred_interval_method  == "Asymp. Bayes") {
-    n_samples <- 400  # Could add this as param
+    n_samples <- 1001  # Could add this as param
     theta_samples <- mvrnorm(n_samples, result_list$theta, result_list$cov_theta)
     bounds <- get_bayes_bounds(theta_samples)
     raw_pred_lower_bounds <- bounds[,1]
     raw_pred_upper_bounds <- bounds[,2]
   } else if (pred_interval_method  == "Full Bayes") {
-    n_init_samples <- 10000  # Could add this as a param
-    n_samples <- 400  # Could add this as param
+    n_init_samples <- 20000  # Could add this as a param
+    n_samples <- 1001  # Could add this as param
     precision_theta <- chol2inv(chol(result_list$cov_theta))
     theta_post_precision <- prior_precision + precision_theta
     theta_post_cov <- chol2inv(chol(theta_post_precision))

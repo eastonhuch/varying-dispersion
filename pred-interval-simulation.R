@@ -5,6 +5,7 @@ require(tidyverse)
 require(mpcmp)
 require(cmp)
 require(scales)
+require(xtable)
 source("discrete-log-normal.R")
 
 # Set parameters
@@ -36,9 +37,10 @@ phi_method <- "joint"
 stephalving_max <- 10
 
 # Arrays for results
-n_vals <- c(10, 30L, 100L)
+# n_vals <- c(10, 30L, 100L, 400L)
+n_vals <- c(10L, 30L)#, 100L, 400L)
 num_n_vals <- length(n_vals)
-reps <- 100L
+reps <- 2L
 n_bootstraps <- 100L
 method_names <- c("Plug-in", "Asymp. Bayes", "Full Bayes")
 num_methods <- length(method_names)
@@ -76,7 +78,7 @@ for (n in n_vals) {
   y_star_interval_widths[] <- NA
   
   for (i in seq(reps)) {
-    print(i)
+    # print(i)
     theta_true <- mvrnorm(1, theta_prior_mean, theta_prior_cov)
     beta_true <- theta_true[beta_idx]
     alpha_true <- theta_true[alpha_idx]
@@ -157,28 +159,53 @@ for (n in n_vals) {
 
 # Display results
 format_float <- label_number(0.001)
+format_float_1d <- label_number(0.1)
 format_percent <- label_percent(0.1)
-result_df <- data.frame(n_vals)
+result_df <- data.frame(n=c("Method", paste0("n=", n_vals)))
 
 # Marginal Coverage
 for (method_name in method_names) {
   result_df <- result_df %>% mutate(
-    !!(paste0(method_name, ": Marginal Coverage")) := paste0(format_float(marginal_coverages[,method_name]), " (", format_float(marginal_coverage_ses[,method_name]), ")")
+    !!(paste0(method_name, ": Marginal Coverage")) := c(method_name, paste0(format_float(marginal_coverages[,method_name]), " (", format_float(marginal_coverage_ses[,method_name]), ")"))
   )
 }
 
 # Coverage rMSE
 for (method_name in method_names) {
   result_df <- result_df %>% mutate(
-    !!(paste0(method_name, ": Coverage rMSE")) := paste0(format_float(coverage_rmses[,method_name]), " (", format_float(coverage_rmses_ses[,method_name]), ")")
+    !!(paste0(method_name, ": Coverage rMSE")) := c(method_name, paste0(format_float(coverage_rmses[,method_name]), " (", format_float(coverage_rmses_ses[,method_name]), ")"))
   )
 }
 
 # Interval Length
 for (method_name in method_names) {
   result_df <- result_df %>% mutate(
-    !!(paste0(method_name, ": Median Interval Length")) := paste0(format_float(interval_width_medians[,method_name]), " (", format_float(interval_width_medians_ses[,method_name]), ")")
+    !!(paste0(method_name, ": Median Interval Length")) := c(method_name, paste0(format_float_1d(interval_width_medians[,method_name]), " (", format_float_1d(interval_width_medians_ses[,method_name]), ")"))
   )
 }
 
-View(result_df)
+row.names(result_df) <- result_df$n
+result_df$n <- NULL
+# View(result_df)
+
+result_df_t <- t(result_df)
+metric_names <- c(
+  "\\multirow{3}{*}{\\parbox{5em}{Marginal Coverage}}", "", "",
+  "\\multirow{3}{*}{\\parbox{5em}{Coverage rMSE}}", "", "",
+  "\\multirow{3}{*}{\\parbox{5em}{Median Length}}", "", ""
+)
+result_df_t <- cbind(Summary=metric_names, result_df_t)
+
+# metric_names <- c("Marginal Coverage", "Coverage rMSE", "Median Length")
+xtable(
+  result_df_t,
+  label="tab:pred_sim",
+  caption="Coverage and median interval lengths for three prediction interval methods. The Plug-in and Asymp. Bayes methods correspond with those explained in Section \\ref{sec:log_normal_inference}. The prior for the fully Bayesian method matches the data generating distribution."
+  ) %>%
+  print(
+    include.colnames=TRUE,
+    include.rownames=FALSE,
+    sanitize.text.function=identity,
+    hline.after=c(-1, 0, 3, 6, 9)
+    # add.to.row=list(pos=list(0), command=paste0(" ", paste0('& \\multicolumn{', num_methods, '}{c}{', metric_names, '} ', collapse=''), '\\\\')),
+  )
