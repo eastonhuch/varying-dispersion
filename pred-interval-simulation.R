@@ -37,9 +37,9 @@ phi_method <- "joint"
 stephalving_max <- 10
 
 # Arrays for results
-n_vals <- c(10, 30L, 100L, 400L)
+n_vals <- c(10L, 30L, 100L, 400L)
 num_n_vals <- length(n_vals)
-reps <- 40L
+reps <- 400L
 n_bootstraps <- 400L
 method_names <- c("Plug-in", "Asymp. Bayes", "Full Bayes")
 num_methods <- length(method_names)
