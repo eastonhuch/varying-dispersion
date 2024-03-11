@@ -37,11 +37,10 @@ phi_method <- "joint"
 stephalving_max <- 10
 
 # Arrays for results
-# n_vals <- c(10, 30L, 100L, 400L)
-n_vals <- c(10L, 30L)#, 100L, 400L)
+n_vals <- c(10, 30L, 100L, 400L)
 num_n_vals <- length(n_vals)
-reps <- 2L
-n_bootstraps <- 100L
+reps <- 40L
+n_bootstraps <- 400L
 method_names <- c("Plug-in", "Asymp. Bayes", "Full Bayes")
 num_methods <- length(method_names)
 
@@ -78,7 +77,7 @@ for (n in n_vals) {
   y_star_interval_widths[] <- NA
   
   for (i in seq(reps)) {
-    # print(i)
+    print(i)
     theta_true <- mvrnorm(1, theta_prior_mean, theta_prior_cov)
     beta_true <- theta_true[beta_idx]
     alpha_true <- theta_true[alpha_idx]

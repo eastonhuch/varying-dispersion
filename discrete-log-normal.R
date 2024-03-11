@@ -1,4 +1,5 @@
 require(Rcpp)
+require(RcppArmadillo)
 require(MASS)
 require(mvtnorm)
 sourceCpp("discrete-log-normal-helpers.cpp")
@@ -319,23 +320,7 @@ dln <- function(
     alpha_samples <- t_samples[,alpha_idx]
     Z <- X %*% t(beta_samples) + exp(Z %*% t(alpha_samples)) * matrix(rnorm(n*n_samples), nrow=n, ncol=n_samples)
     Y <- floor(exp(Z))
-    
-    # Lower bounds
-    raw_lower_bounds <- apply(Y, 1, function(v) quantile(v, probs=0.025))
-    floor_lower_bounds <- floor(raw_lower_bounds)
-    floor_lower_probs <- rowMeans(Y < floor_lower_bounds)
-    ceiling_lower_bounds <- ceiling(raw_lower_bounds)
-    ceiling_lower_probs <- rowMeans(Y < ceiling_lower_bounds)
-    lower_probs_diff <- ceiling_lower_probs - floor_lower_probs
-    print(min(lower_probs_diff))
-    ceiling_lower_prob <- (0.025 - floor_lower_probs) / lower_probs_diff
-    ceiling_lower_prob[!is.finite(ceiling_lower_prob)] <- 1
-    # hist(ceiling_lower_prob)
-    lower_use_ceiling <- runif(n) < ceiling_lower_prob
-    lower_bounds <- lower_use_ceiling * ceiling_lower_bounds + (!lower_use_ceiling) * floor_lower_bounds
-    # print(lower_bounds - raw_lower_bounds)
-
-    # Upper bounds
+    lower_bounds <- apply(Y, 1, function(v) quantile(v, probs=0.025))
     upper_bounds <- apply(Y, 1, function(v) quantile(v, probs=0.975))
     bounds <- cbind(lower_bounds, upper_bounds)
     bounds
