@@ -1,11 +1,12 @@
 #include<RcppArmadillo.h>
 #include <stdexcept>
 #include <iostream>
+#include <limits>
 
 //[[Rcpp::depends(RcppArmadillo)]]
 
 //[[Rcpp::export]]
-double integrate_dln_scalar(double mu, double sigma, double k, bool calc_deriv=false, bool wrt_mu=false, double sd_multiplier=20.0) {
+double integrate_dln_scalar(double mu, double sigma, double k, bool calc_deriv=false, bool wrt_mu=false, double sd_multiplier=10.0) {
   // Numeric integration to approximate moments and their derivatives
   // This will not be accurate when there is high skew/kurtosis
   double sigma2 = sigma * sigma;
@@ -18,7 +19,8 @@ double integrate_dln_scalar(double mu, double sigma, double k, bool calc_deriv=f
   double z_lower, z_upper, dist_lower, dist_upper, factor_lower, factor_upper, y_k;
   double result = 0, inc = 0, inc_last = 0;
   if (y_max < 0) {
-    throw std::overflow_error("moments of discrete log-normal are too large");
+    // throw std::overflow_error("moments of discrete log-normal are too large");
+    return std::numeric_limits<double>::quiet_NaN();
   }
   int y_inc = ceil((y_max - y_min) / 10000.0); // skip values if needed
   // std::cout << "y_min: " << y_min << std::endl;
@@ -70,7 +72,7 @@ double integrate_dln_scalar(double mu, double sigma, double k, bool calc_deriv=f
 }
 
 //[[Rcpp::export]]
-Rcpp::NumericVector integrate_dln(Rcpp::NumericVector mu, Rcpp::NumericVector sigma, double k, bool calc_deriv=false, bool wrt_mu=false, double sd_multiplier=20.0) {
+Rcpp::NumericVector integrate_dln(Rcpp::NumericVector mu, Rcpp::NumericVector sigma, double k, bool calc_deriv=false, bool wrt_mu=false, double sd_multiplier=10.0) {
   if (mu.size() != sigma.size()) {
     throw std::invalid_argument("mu and sigma must have equal length");
   }
