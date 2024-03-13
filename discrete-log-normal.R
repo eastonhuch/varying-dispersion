@@ -10,7 +10,10 @@ ll_latentnorm <- function(y, X, Z, beta, alpha) {
   sigma <- exp(drop(Z %*% alpha))
   z_bar <- (log1p(y) - mu) / sigma 
   z_underbar <- (log(y) - mu) / sigma
-  ll <- pnorm(z_underbar, log.p=TRUE) + log(exp(pnorm(z_bar, log.p=TRUE) - pnorm(z_underbar, log.p=TRUE)) - 1)
+  ll <- pnorm(z_bar, log.p=TRUE) + log(1 - exp(pnorm(z_underbar, log.p=TRUE) - pnorm(z_bar, log.p=TRUE)))
+  # The above line is a fancy way of calculating the following:
+  # ll2 <- log(pnorm(z_bar) - pnorm(z_underbar))
+  # print(ll / ll2)  # Should be ones
   mean(ll)
 }
 
