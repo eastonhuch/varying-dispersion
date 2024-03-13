@@ -198,7 +198,7 @@ result_df_t <- cbind(Summary=metric_names, result_df_t)
 # metric_names <- c("Marginal Coverage", "Coverage rMSE", "Median Length")
 xtable(
   result_df_t,
-  align="lllrrrrr"
+  align="lllrrrr",
   label="tab:pred_sim",
   caption="Coverage and median interval lengths for three prediction interval methods. The Plug-in and Asymp. Bayes methods correspond with those explained in Section \\ref{sec:log_normal_inference}. The prior for the fully Bayesian method matches the data generating distribution."
   ) %>%
