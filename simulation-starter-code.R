@@ -1,5 +1,7 @@
 # devtools::install_github("SuneelChatla/cmp")
 # devtools::install_github("thomas-fung/mpcmp") 
+require(tidyverse)
+require(xtable)
 require(mpcmp)
 require(cmp)
 require(scales)
@@ -171,38 +173,85 @@ for (i in seq(reps)) {
 nominal_coverage <- 0.95
 format_float <- label_number(0.001)
 format_percent <- label_percent(0.1)
+n_bootstraps <- 400L
+print_val_with_se <- function(val, se, percent=FALSE) {
+  digits <- abs(min(c(floor(log10(min(se))), 0)))
+  if (percent) digits <- max(c(digits - 2, 0))
+  multiplier <- ifelse(percent, 100, 1)
+  fmt <- paste0("%.", digits, "f")
+  val_digits <- sprintf(fmt, val*multiplier)
+  se_digits <- sprintf(fmt, se*multiplier)
+  if (percent) {
+    res <- paste0(val_digits, "% (", se_digits, "%)")
+  } else {
+    res <- paste0(val_digits, " (", se_digits, ")")
+  }
+  res
+}
 
 # Fitting times
 avg_fitting_times <- colMeans(fitting_times)
-consolidated_results <- data.frame(`Avg Elapsed Time (Seconds)`=format_float(avg_fitting_times), check.names=FALSE)
+avg_fitting_times_ses <- apply(fitting_times, 2, sd) / sqrt(reps)
+avg_fitting_times_chr <- print_val_with_se(avg_fitting_times, avg_fitting_times_ses)
+consolidated_results <- data.frame(`Avg Elapsed Time (Seconds)`=avg_fitting_times_chr, check.names=FALSE)
+row.names(consolidated_results) <- method_names
 boxplot(fitting_times, log="y", main="Model-fitting Time by Method", ylab="Elapsed Time (Seconds)")
 
 # Mean
-mu_rmse <- sqrt(apply((mu_estimates - mu)^2, MARGIN=c(1,3), mean))
+mu_rmse <- sqrt(apply((mu_estimates - mu)^2, MARGIN=c(2,3), mean))
 mu_avg_rmse <- colMeans(mu_rmse)
-mu_observation_coverage <- apply(mu_covered, MARGIN=c(1,3), mean)
+mu_avg_rmse_ses <- apply(mu_rmse, 2, sd) / sqrt(reps)
+mu_rep_coverage <- apply(mu_covered, MARGIN=c(2,3), mean)
 mu_marginal_coverage <- colMeans(mu_observation_coverage)
-mu_coverage_rMSE <- sqrt(colMeans((mu_observation_coverage - nominal_coverage)^2))
-mu_avg_interval_width <- apply(mu_interval_widths, MARGIN=c(3), mean)
+mu_marginal_coverage_ses <- apply(mu_observation_coverage, 2, sd) / sqrt(reps)
+mu_rep_interval_widths <- apply(mu_interval_widths, MARGIN=c(2, 3), mean)
+mu_avg_interval_widths <- colMeans(mu_rep_interval_widths)
+mu_avg_interval_widths_ses <- apply(mu_rep_interval_widths, 2, sd) / sqrt(reps)
 
-consolidated_results$`Mean: Avg rMSE` <- format_float(mu_avg_rmse)
-consolidated_results$`Mean: Avg Interval Width` <- format_float(mu_avg_interval_width)
-consolidated_results$`Mean: Marginal Coverage` <- format_percent(mu_marginal_coverage)
-consolidated_results$`Mean: Coverage rMSE` <- format_float(mu_coverage_rMSE)
+mu_observation_coverage <- apply(mu_covered, MARGIN=c(1,3), mean)
+mu_coverage_rMSE <- sqrt(colMeans((mu_observation_coverage - nominal_coverage)^2))
+mu_coverage_rMSE_ses <- apply(mu_covered, MARGIN=3, function(M) {
+  bootstrap_coverage_rmses <- rep(0, n_bootstraps)
+  for (j in seq(n_bootstraps)) {
+    M_boot <- M[,sample(ncol(M), replace=TRUE)]
+    bootstrap_observation_coverages <- rowMeans(M_boot)
+    bootstrap_coverage_rmses[j] <- sqrt(mean((bootstrap_observation_coverages - nominal_coverage)^2))
+  }
+  sd(bootstrap_coverage_rmses)
+})
+
+consolidated_results$`Mean: Avg rMSE` <- print_val_with_se(mu_avg_rmse, mu_avg_rmse_ses)
+consolidated_results$`Mean: Avg Interval Width` <- print_val_with_se(mu_avg_interval_widths, mu_avg_interval_widths_ses)
+consolidated_results$`Mean: Marginal Coverage` <- print_val_with_se(mu_marginal_coverage, mu_marginal_coverage_ses, percent=TRUE)
+consolidated_results$`Mean: Coverage rMSE` <- print_val_with_se(mu_coverage_rMSE, mu_coverage_rMSE_ses, percent=TRUE)
 
 # SD
-sd_avg <- apply(sd_estimates, MARGIN=c(1,3), mean)
-sd_rmse <- sqrt(apply((sd_estimates - sd_true)^2, MARGIN=c(1,3), mean))
+sd_rmse <- sqrt(apply((sd_estimates - sd_true)^2, MARGIN=c(2,3), mean))
 sd_avg_rmse <- colMeans(sd_rmse)
-sd_observation_coverage <- apply(sd_covered, MARGIN=c(1,3), mean)
+sd_avg_rmse_ses <- apply(sd_rmse, 2, sd) / sqrt(reps)
+sd_rep_coverage <- apply(sd_covered, MARGIN=c(2,3), mean)
 sd_marginal_coverage <- colMeans(sd_observation_coverage)
-sd_coverage_rMSE <- sqrt(colMeans((sd_observation_coverage - nominal_coverage)^2))
-sd_avg_interval_width <- apply(sd_interval_widths, MARGIN=c(3), mean)
+sd_marginal_coverage_ses <- apply(sd_observation_coverage, 2, sd) / sqrt(reps)
+sd_rep_interval_widths <- apply(sd_interval_widths, MARGIN=c(2, 3), mean)
+sd_avg_interval_widths <- colMeans(sd_rep_interval_widths)
+sd_avg_interval_widths_ses <- apply(sd_rep_interval_widths, 2, sd) / sqrt(reps)
 
-consolidated_results$`SD: Avg rMSE` <- format_float(sd_avg_rmse)
-consolidated_results$`SD: Avg Interval Width` <- format_float(sd_avg_interval_width)
-consolidated_results$`SD: Marginal Coverage` <- format_percent(sd_marginal_coverage)
-consolidated_results$`SD: Coverage rMSE` <- format_float(sd_coverage_rMSE)
+sd_observation_coverage <- apply(sd_covered, MARGIN=c(1,3), mean)
+sd_coverage_rMSE <- sqrt(colMeans((sd_observation_coverage - nominal_coverage)^2))
+sd_coverage_rMSE_ses <- apply(sd_covered, MARGIN=3, function(M) {
+  bootstrap_coverage_rmses <- rep(0, n_bootstraps)
+  for (j in seq(n_bootstraps)) {
+    M_boot <- M[,sample(ncol(M), replace=TRUE)]
+    bootstrap_observation_coverages <- rowMeans(M_boot)
+    bootstrap_coverage_rmses[j] <- sqrt(mean((bootstrap_observation_coverages - nominal_coverage)^2))
+  }
+  sd(bootstrap_coverage_rmses)
+})
+
+consolidated_results$`SD: Avg rMSE` <- print_val_with_se(sd_avg_rmse, sd_avg_rmse_ses)
+consolidated_results$`SD: Avg Interval Width` <- print_val_with_se(sd_avg_interval_widths, sd_avg_interval_widths_ses)
+consolidated_results$`SD: Marginal Coverage` <- print_val_with_se(sd_marginal_coverage, sd_marginal_coverage_ses, percent=TRUE)
+consolidated_results$`SD: Coverage rMSE` <- print_val_with_se(sd_coverage_rMSE, sd_coverage_rMSE_ses, percent=TRUE)
 
 # Plot avg SD vs. x2
 sd_order <- order(sd_true)
@@ -216,3 +265,19 @@ colSums(used_score_for_cov)
 # Make table pretty
 final_table <- t(consolidated_results)
 View(final_table)
+
+xtable(
+  final_table,
+  label="tab:main_sim",
+  align=paste0("l", paste0(rep("r", num_methods), collapse="")),
+  caption=paste0(
+    "Method comparison for data simulated from MPCMP (n=", n, ").",
+    " Avg rMSE averages over the covariate values.",
+    " We fix covariates across repetitions to assess conditional coverage.",
+    " Coverage rMSE calculates an rMSE across observation-level coverages (averaging over repetitions).")
+) %>%
+  print(
+    include.colnames=TRUE,
+    include.rownames=TRUE,
+    hline.after=c(-1, 0, 1, 5, 9)
+  )
