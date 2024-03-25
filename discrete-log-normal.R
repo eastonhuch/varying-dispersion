@@ -22,12 +22,12 @@ get_kappa <- function(z_bar, z_underbar, q) {
   if (any(z_underbar >= z_bar)) stop("z_bar must be greater than z_underbar")
   
   # -Inf for z_underbar
-  kappa_q_neg_inf <- exp(dnorm(z_bar, log=TRUE) - pnorm(z_bar, log.p=TRUE))
+  kappa_q_neg_inf <- z_bar^q * exp(dnorm(z_bar, log=TRUE) - pnorm(z_bar, log.p=TRUE))
   
   # Typical case
   # Denominator
   z_underbar_pos <- z_underbar > 0
-  z_underbar_neg <- !z_underbar_pos  # Technically includes 0 too, but I deal with this separately
+  z_underbar_neg <- !z_underbar_pos  # Technically includes 0 too
   
   log_cdf_bar <- pnorm(z_bar, log.p=TRUE)
   log_cdf_underbar <- pnorm(z_underbar, log.p=TRUE)
@@ -42,13 +42,19 @@ get_kappa <- function(z_bar, z_underbar, q) {
   log_den[z_underbar_neg] <- log_den_neg[z_underbar_neg]
   
   # Numerator
-  z_bar_q_pos <- (z_bar^q) > 0
-  z_underbar_q_pos <- (z_underbar^q) > 0
-  both_pos <- z_bar_q_pos & z_underbar_q_pos
-  both_neg <- (!z_bar_q_pos) & (!z_underbar_q_pos)
-  sign_switch <- z_bar_q_pos & (!z_underbar_q_pos)
-  log_mod_bar <- q * log(abs(z_bar)) + dnorm(z_bar, log=TRUE)
-  log_mod_underbar <- q * log(abs(z_underbar)) + dnorm(z_underbar, log=TRUE)
+  z_bar_q <- z_bar^q
+  z_underbar_q <- z_underbar^q
+  both_pos <- (z_bar_q > 0) & (z_underbar_q > 0)
+  both_neg <- (z_bar_q < 0) & (z_underbar_q < 0)
+  sign_switch <- (z_bar_q >= 0) & (z_underbar_q <= 0)
+  log_mod_bar <- dnorm(z_bar, log=TRUE)
+  log_mod_underbar <- dnorm(z_underbar, log=TRUE)
+  q_pos <- q > 0
+  if (q_pos) {
+    # NOTE: This will create -Inf values for zeroes; we correct for this later
+    log_mod_bar <- log_mod_bar + q * log(abs(z_bar))
+    log_mod_underbar <- log_mod_underbar + q * log(abs(z_underbar))
+  }
   bar_mod_larger <- log_mod_bar > log_mod_underbar
   keep_order <- sign_switch | (both_pos & bar_mod_larger) | (both_neg & (!bar_mod_larger))
   sign <- (-1)^(!keep_order)
@@ -59,35 +65,32 @@ get_kappa <- function(z_bar, z_underbar, q) {
   log_mod_d <- mod_b_greater * log_mod_b + (!mod_b_greater) * log_mod_a
   const <- (-1)^(!sign_switch)
   log_num <- log_mod_c + log(exp(log_mod_d - log_mod_c) + const)
+  z_bar_0 <- (z_bar == 0) & q_pos
+  log_num[z_bar_0] <- log_mod_underbar[z_bar_0]
+  z_underbar_0 <- (z_underbar == 0) & q_pos
+  log_num[z_underbar_0] <- log_mod_bar[z_underbar_0]
   kappa_q <- sign * exp(log_num - log_den)
   
-  # 0 for z_bar
-  kappa_q_0_z_bar <- -exp(log_mod_underbar - log_den)
-  
-  # 0 for z_underbar
-  kappa_q_0_z_underbar <- exp(log_mod_bar - log_den)
-  
-  # Put these together
+  # Handle z_underbar = -Inf
   z_underbar_neg_inf <- z_underbar == -Inf
   kappa_q[z_underbar_neg_inf] <- kappa_q_neg_inf[z_underbar_neg_inf]
-  
-  z_bar_0 <- z_bar == 0
-  kappa_q[z_bar_0] <- kappa_q_0_z_bar[z_bar_0]
-  
-  z_underbar_0 <- z_underbar == 0
-  kappa_q[z_underbar_0] <- kappa_q_0_z_underbar[z_underbar_0]
   
   # Return result
   kappa_q
 }
 
 # Tests for the above function
-# z_underbar <- c(-Inf, -100, -7, -1, 0, 6, 20, 99)
-# z_bar <-      c(-4. ,  -99, -6,  0, 1, 7, 21, 100)
+# Easy cases
+# z_underbar <- c(-7, -1  , -1, 0.1, 0, 6)
+# z_bar      <- c(-6, -0.1,  0, 1. , 1, 7)
 # q <- 3
 # get_kappa(z_bar, z_underbar, q)
 # (z_bar^q * dnorm(z_bar) - z_underbar^q * dnorm(z_underbar)) /
 #   (pnorm(z_bar) - pnorm(z_underbar))
+# Weird cases
+# z_underbar <- c(-Inf, -100, -7, -1, 0, 6, 20, 99)
+# z_bar <-      c(-4. ,  -99, -6,  0, 1, 7, 21, 100)
+# z_bar^q * dnorm(z_bar) / pnorm(z_bar) # For -Inf cases
 
 gradutils <- function(y, X, Z, beta, alpha) {
   mu <- drop(X %*% beta)
@@ -176,13 +179,13 @@ dln <- function(
     k_alpha <- kappa_1 * (kappa_1 - 1) + kappa_3
     k_beta_alpha <- (kappa_2 + kappa_0 * (kappa_1 - 1)) / sigma
     
-    hess11 <- -crossprod(sqrt(k_beta) * X) / n
-    hess12 <- -(t(X) %*% (k_beta_alpha * Z)) / n
-    hess22 <- -crossprod(sqrt(k_alpha) * Z) / n
-    hess <- rbind(
+    hess11 <- t(X) %*% (k_beta * X)
+    hess12 <- t(X) %*% (k_beta_alpha * Z)
+    hess22 <- t(Z) %*% (k_alpha * Z)
+    hess_raw <- rbind(
       cbind(hess11, hess12),
-      cbind(t(hess12), hess22)
-    )
+      cbind(t(hess12), hess22))
+    hess <- -(hess_raw + t(hess_raw)) / (2*n)  # Ensure symmetry
     hess
   }
   
@@ -238,7 +241,8 @@ dln <- function(
       kappa_0 <- gradutils_result$kappa_0
       kappa_1 <- gradutils_result$kappa_1
       e1 <- mu - sigma * kappa_0
-      e2 <- (sigma^2 - sigma^2*kappa_1+mu^2 - 2*mu*sigma*kappa_0) # Need to double-check this
+      e2 <- (sigma^2 - sigma^2*kappa_1+mu^2 - 2*mu*sigma*kappa_0)
+      # e2_other <- sigma^2 * (1 - kappa_1 - kappa_0^2) + e1^2  # Other way of calculating this
       v <- e2 - 2*e1*mu + mu^2
       em_gradutils_result <- em_gradutils(Z, sigma, v, alpha)
       inc <- solve(em_gradutils_result$hess, em_gradutils_result$grad)
@@ -262,7 +266,7 @@ dln <- function(
     } else {
       stop("method must be 'Newton' or 'EM'")
     }
-    if (verbose) cat("Iteration: ", iter, ", Deviance: ", dev, "\n", sep="")
+    if (verbose) cat("Iteration: ", iter, ", Deviance: ", sprintf("%.8f", dev), "\n", sep="")
   }
   
   # Add results to list
@@ -273,12 +277,14 @@ dln <- function(
   result_list$theta <- theta
   
   # Covariance matrix
-  # Estimate based on observed information
+  # Try to estimate based on observed information
   result_list$covariance_via_score <- FALSE
-  hess <- get_hess(beta, alpha)
-  try({result_list$cov_theta <- chol2inv(chol(-hess)) / n}, silent=TRUE)
+  try({
+    hess <- get_hess(beta, alpha)
+    result_list$cov_theta <- chol2inv(chol(-hess)) / n
+  }, silent=TRUE)
   
-  # Estimate based on score function: This one is (almost) always invertible
+  # If needed, estimate based on score function: This one is (almost) always invertible
   if (is.null(result_list$cov_theta)) {
     result_list$covariance_via_score <- TRUE
     grad_matrix <- get_grad_matrix(beta, alpha)
