@@ -115,6 +115,7 @@ gradutils <- function(y, X, Z, beta, alpha) {
 }
 
 em_gradutils <- function(Z, sigma, v, alpha) {
+  n <- nrow(Z)
   grad <- t(Z/n) %*% (v/sigma^2 - 1)
   Z_over_sigma <- Z / sigma
   hess <- -2 * t(Z_over_sigma) %*%  (v * Z_over_sigma / n)
@@ -131,6 +132,7 @@ dln <- function(
   max_iter = 100, stephalving_maxiter=10, tol=1e-8, verbose=TRUE) {
   
   # Initialize some values
+  start_time <- Sys.time()
   result_list <- list()
   n <- nrow(X)
   p <- ncol(X)
@@ -294,6 +296,8 @@ dln <- function(
   result_list$beta <- beta
   result_list$alpha <- alpha
   result_list$theta <- theta
+  end_fit_time <- Sys.time()
+  if (verbose) print("Finished model fitting; beginning inference")
   
   # Covariance matrix
   # Try to estimate based on observed information
@@ -343,8 +347,10 @@ dln <- function(
   result_list$sd_lower_bounds <- result_list$sd_estimates - 1.96 * sd_ses
   result_list$sd_upper_bounds <- result_list$sd_estimates + 1.96 * sd_ses
   result_list$sd_interval_widths <- result_list$sd_upper_bounds - result_list$sd_lower_bounds
+  if (verbose) print("Finished inference; beginning creation of prediction intervals")
   
   # Prediction intervals
+  start_pred_interval_time <- Sys.time()
   use_pred_intervals <- TRUE
   get_bayes_bounds <- function(t_samples) {
     beta_samples <- t_samples[,beta_idx]
@@ -404,6 +410,11 @@ dln <- function(
     result_list$pred_upper_bounds <- round(raw_pred_upper_bounds)
     result_list$pred_interval_widths <- result_list$pred_upper_bounds - result_list$pred_lower_bounds
   }
+  end_time <- Sys.time()
+  result_list$fit_time <- end_fit_time - start_time
+  result_list$inference_time <- start_pred_interval_time - end_fit_time
+  result_list$pred_interval_time <- end_time - start_pred_interval_time
+  result_list$elapsed_time <- end_time - start_time
   
   result_list
 }
