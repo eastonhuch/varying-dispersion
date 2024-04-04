@@ -115,8 +115,11 @@ gradutils <- function(y, X, Z, beta, alpha) {
 }
 
 em_gradutils <- function(Z, sigma, v, alpha) {
-  grad <- t(Z) %*% (v/sigma^2 - 1)
-  hess <- -2 * crossprod(sqrt(v)/sigma * Z)
+  n <- nrow(Z)
+  grad <- t(Z/n) %*% (v/sigma^2 - 1)
+  Z_over_sigma <- Z / sigma
+  hess <- -2 * t(Z_over_sigma) %*%  (v * Z_over_sigma / n)
+  hess <- (hess + t(hess)) / 2  # Ensure symmetry
   list(
     grad=grad,
     hess=hess
@@ -124,11 +127,12 @@ em_gradutils <- function(Z, sigma, v, alpha) {
 }
 
 dln <- function(
-  y, X, Z, betastart, alphastart, method="Newton", pred_interval_method="None",
+  y, X, Z, betastart, alphastart, method="Newton", pred_interval_method="None", Xnew=NULL, Znew=NULL,
   prior_mean=NULL, prior_precision=NULL, # NOTE: These are only used for pred intervals with Full Bayes
   max_iter = 100, stephalving_maxiter=10, tol=1e-8, verbose=TRUE) {
   
   # Initialize some values
+  start_time <- Sys.time()
   result_list <- list()
   n <- nrow(X)
   p <- ncol(X)
@@ -230,9 +234,26 @@ dln <- function(
       # Update beta
       gradutils_result <- gradutils(y, X, Z, beta, alpha)
       e1 <- gradutils_result$mu - gradutils_result$sigma * gradutils_result$kappa_0
-      beta <- solve(
+      beta_new <- solve(
         crossprod(X / gradutils_result$sigma),
         t(X) %*% (e1 / gradutils_result$sigma^2))
+      inc <- beta_new - beta
+      dev <- Inf
+      step <- 1
+      stephalving_iter <- 0
+      while (((dev >= dev_last) || (!is.finite(dev))) && (stephalving_iter <= stephalving_maxiter)) {
+        beta_new <- beta + step * inc
+        dev <- get_dev(beta_new, alpha)
+        if (verbose && (stephalving_iter > 0)) {
+          cat(
+            "Step-halving Iterations: ", stephalving_iter,
+            ", Deviance: ", dev,
+            "\n", sep="")
+        }
+        stephalving_iter <- stephalving_iter + 1
+        step <- step / 2
+      }
+      beta <- beta_new
       
       # Update alpha
       gradutils_result <- gradutils(y, X, Z, beta, alpha)  # Need to update these again
@@ -275,6 +296,8 @@ dln <- function(
   result_list$beta <- beta
   result_list$alpha <- alpha
   result_list$theta <- theta
+  end_fit_time <- Sys.time()
+  if (verbose) print("Finished model fitting; beginning inference")
   
   # Covariance matrix
   # Try to estimate based on observed information
@@ -296,13 +319,15 @@ dln <- function(
   result_list$cov_alpha <- result_list$cov_theta[alpha_idx, alpha_idx]
   
   # Fitted values
-  z_mu <- drop(X %*% beta)
-  z_sigma <- drop(exp(Z %*% alpha))
+  if (is.null(Xnew)) Xnew <- X
+  if (is.null(Znew)) Znew <- Z
+  z_mu <- drop(Xnew %*% beta)
+  z_sigma <- drop(exp(Znew %*% alpha))
   result_list$fitted_values <- integrate_dln(z_mu, z_sigma, 1)
   mean_mu_derivs <- integrate_dln(z_mu, z_sigma, 1, calc_deriv=TRUE, wrt_mu=TRUE)
   mean_sigma_derivs <- integrate_dln(z_mu, z_sigma, 1, calc_deriv=TRUE, wrt_mu=FALSE)
-  mean_beta_grads <- mean_mu_derivs * X
-  mean_alpha_grads <- mean_sigma_derivs * z_sigma * Z
+  mean_beta_grads <- mean_mu_derivs * Xnew
+  mean_alpha_grads <- mean_sigma_derivs * z_sigma * Znew
   mean_theta_grads <- cbind(mean_beta_grads, mean_alpha_grads)
   fitted_ses <- sqrt(rowSums((mean_theta_grads %*% result_list$cov_theta) * mean_theta_grads))
   result_list$fitted_lower_bounds <- result_list$fitted_values - 1.96 * fitted_ses
@@ -315,21 +340,23 @@ dln <- function(
   result_list$sd_estimates <- sqrt(var_estimates)
   moment2_mu_derivs <- integrate_dln(z_mu, z_sigma, 2, calc_deriv=TRUE, wrt_mu=TRUE)
   moment2_sigma_derivs <- integrate_dln(z_mu, z_sigma, 2, calc_deriv=TRUE, wrt_mu=FALSE)
-  sd_beta_grads <- 1 / (2 * result_list$sd_estimates) * (moment2_mu_derivs - 2 * result_list$fitted_values * mean_mu_derivs) * X
-  sd_alpha_grads <- 1 / (2 * result_list$sd_estimates) * (moment2_sigma_derivs - 2 * result_list$fitted_values * mean_sigma_derivs) * z_sigma * Z
+  sd_beta_grads <- 1 / (2 * result_list$sd_estimates) * (moment2_mu_derivs - 2 * result_list$fitted_values * mean_mu_derivs) * Xnew
+  sd_alpha_grads <- 1 / (2 * result_list$sd_estimates) * (moment2_sigma_derivs - 2 * result_list$fitted_values * mean_sigma_derivs) * z_sigma * Znew
   sd_theta_grads <- cbind(sd_beta_grads, sd_alpha_grads)
   sd_ses <- sqrt(rowSums((sd_theta_grads %*% result_list$cov_theta) * sd_theta_grads))
   result_list$sd_lower_bounds <- result_list$sd_estimates - 1.96 * sd_ses
   result_list$sd_upper_bounds <- result_list$sd_estimates + 1.96 * sd_ses
   result_list$sd_interval_widths <- result_list$sd_upper_bounds - result_list$sd_lower_bounds
+  if (verbose) print("Finished inference; beginning creation of prediction intervals")
   
   # Prediction intervals
+  start_pred_interval_time <- Sys.time()
   use_pred_intervals <- TRUE
   get_bayes_bounds <- function(t_samples) {
     beta_samples <- t_samples[,beta_idx]
     alpha_samples <- t_samples[,alpha_idx]
-    Z <- X %*% t(beta_samples) + exp(Z %*% t(alpha_samples)) * matrix(rnorm(n*n_samples), nrow=n, ncol=n_samples)
-    Y <- floor(exp(Z))
+    Z_outcome <- Xnew %*% t(beta_samples) + exp(Znew %*% t(alpha_samples)) * matrix(rnorm(nrow(Xnew)*n_samples), nrow=nrow(Xnew), ncol=n_samples)
+    Y <- floor(exp(Z_outcome))
     lower_bounds <- apply(Y, 1, function(v) quantile(v, probs=0.025))
     upper_bounds <- apply(Y, 1, function(v) quantile(v, probs=0.975))
     bounds <- cbind(lower_bounds, upper_bounds)
@@ -367,7 +394,7 @@ dln <- function(
     raw_pred_lower_bounds <- bounds[,1]
     raw_pred_upper_bounds <- bounds[,2]
   } else if (pred_interval_method == "Plug-in") {
-    XSigmaXt_diag <- rowSums((X %*% result_list$cov_beta) * X)
+    XSigmaXt_diag <- rowSums((Xnew %*% result_list$cov_beta) * Xnew)
     pred_se <- sqrt(z_sigma^2 + XSigmaXt_diag)
     raw_pred_lower_bounds <- floor(exp(z_mu - 1.96 * pred_se))
     raw_pred_upper_bounds <- floor(exp(z_mu + 1.96 * pred_se))
@@ -383,6 +410,11 @@ dln <- function(
     result_list$pred_upper_bounds <- round(raw_pred_upper_bounds)
     result_list$pred_interval_widths <- result_list$pred_upper_bounds - result_list$pred_lower_bounds
   }
+  end_time <- Sys.time()
+  result_list$fit_time <- end_fit_time - start_time
+  result_list$inference_time <- start_pred_interval_time - end_fit_time
+  result_list$pred_interval_time <- end_time - start_pred_interval_time
+  result_list$elapsed_time <- end_time - start_time
   
   result_list
 }

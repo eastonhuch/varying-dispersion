@@ -1,7 +1,8 @@
 # Code for implementing the moment-based methods
 
 # epl: pseudolikelihood model
-epl <- function(y, X, Z, betastart, alphastart, tol=1e-8, max_iter=100, stephalving_maxiter=10, verbose=FALSE) {
+epl <- function(y, X, Z, betastart, alphastart, Xnew=NULL, Znew=NULL, tol=1e-8, max_iter=100, stephalving_maxiter=10, verbose=FALSE) {
+  start_time <- Sys.time()
   result_list <- list()
   n <- nrow(X)
   p <- ncol(X)
@@ -92,7 +93,7 @@ epl <- function(y, X, Z, betastart, alphastart, tol=1e-8, max_iter=100, stephalv
     dev <- Inf
     step <- 1
     stephalving_iter <- 0
-    while ((dev >= dev_last) && (stephalving_iter <= stephalving_maxiter)) {
+    while (((dev >= dev_last) || (!is.finite(dev))) && (stephalving_iter <= stephalving_maxiter)) {
       theta_new <- theta - step * inc
       dev <- get_dev(theta_new[beta_idx], theta_new[alpha_idx])
       if (verbose && (stephalving_iter > 0)) {
@@ -112,6 +113,8 @@ epl <- function(y, X, Z, betastart, alphastart, tol=1e-8, max_iter=100, stephalv
   }
   
   if (iter > max_iter) warning("Hit max_iter and failed to converge")
+  end_fit_time <- Sys.time()
+  if (verbose) print("Finished model fitting; beginning inference")
   
   # Sandwich estimator
   row_grads <- get_row_grads(beta, alpha) / n
@@ -129,18 +132,20 @@ epl <- function(y, X, Z, betastart, alphastart, tol=1e-8, max_iter=100, stephalv
   result_list$cov_theta <- sandwich
   
   # Fitted values
-  mu <- get_mu(beta)
+  if (is.null(Xnew)) Xnew <- X
+  if (is.null(Znew)) Znew <- Z
+  mu <- c(exp(Xnew %*% beta))
   result_list$mu <- mu
   result_list$fitted_values <- mu
   
   # Confidence intervals for fitted values
-  fitted_ses <- sqrt(rowSums((X %*% result_list$cov_beta) * X)) * mu
+  fitted_ses <- sqrt(rowSums((Xnew %*% result_list$cov_beta) * Xnew)) * mu
   result_list$fitted_lower_bounds <- mu - 1.96 * fitted_ses
   result_list$fitted_upper_bounds <- mu + 1.96 * fitted_ses
   result_list$fitted_interval_widths <- result_list$fitted_upper_bounds - result_list$fitted_lower_bounds
   
   # Estimated standard deviations
-  phi <- get_phi(alpha)
+  phi <- c(exp(Znew %*% alpha))
   var_estimates <- phi * mu
   sd_estimates <- sqrt(var_estimates)
   result_list$phi <- phi
@@ -148,12 +153,19 @@ epl <- function(y, X, Z, betastart, alphastart, tol=1e-8, max_iter=100, stephalv
   result_list$sd_estimates <- sd_estimates
   
   # Confidence intervals for standard deviations
-  W <- cbind(X, Z)
+  W <- cbind(Xnew, Znew)
   sd_grads <- result_list$sd_estimates * W
   sd_ses <- 0.5 * sqrt(rowSums((sd_grads %*% result_list$cov_theta) * sd_grads))
   result_list$sd_lower_bounds <- result_list$sd_estimates - 1.96 * sd_ses
   result_list$sd_upper_bounds <- result_list$sd_estimates + 1.96 * sd_ses
   result_list$sd_interval_widths <- result_list$sd_upper_bounds - result_list$sd_lower_bounds
+  if (verbose) print("Finished inference")
+
+  # Timing
+  end_time <- Sys.time()
+  result_list$fit_time <- end_fit_time - start_time
+  result_list$inference_time <- end_time - end_fit_time
+  result_list$elapsed_time <- end_time - start_time
 
   result_list
 }

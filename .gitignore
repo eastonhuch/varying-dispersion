@@ -7,3 +7,5 @@ cmp-package.R
 collisions.pdf
 test-other-packages.R
 other-packages.R
+.DS_Store
+covid-data/
