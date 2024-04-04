@@ -58,24 +58,34 @@ alpha_start <- rep(0, ncol(Z))
 names(alpha_start) <- colnames(Z)
 alpha_start[1] <- log(summary(mod_quasipois)$dispersion)
 max_iter <- 100
-stephalving_max <- 10
+stephalving_max <- 50
 mod_epl <- epl(y, X, Z, betastart = beta_start, alphastart = alpha_start, Xnew=Xnew, Znew=Znew,
-               max_iter=max_iter, stephalving_maxiter=stephalving_max, verbose=FALSE)
+               max_iter=max_iter, stephalving_maxiter=stephalving_max, verbose=TRUE)
 
-mod_approx_bayes <- dln(y, X, Z, betastart = beta_start, alphastart = alpha_start, method="Newton",
+# The EM algorithm works great!
+mod_dln_em <- dln(y, X, Z, betastart = beta_start, alphastart = alpha_start, method="EM",
                         pred_interval_method="Asymp. Bayes", Xnew=Xnew, Znew=Znew,
-                        max_iter=max_iter, stephalving_maxiter=stephalving_max, tol=1e-8, verbose=FALSE)
+                        max_iter=max_iter, stephalving_maxiter=stephalving_max, tol=1e-8, verbose=TRUE)
 
+# This one is prone to getting stuck in local optima
+mod_dln_newton <- dln(y, X, Z,
+                        betastart = mod_dln_em$beta + rnorm(length(mod_dln_em$beta), sd=1e-2),
+                        alphastart = mod_dln_em$alpha + rnorm(length(mod_dln_em$alpha), sd=1e-2),
+                        method="Newton", pred_interval_method="Asymp. Bayes", Xnew=Xnew, Znew=Znew,
+                        max_iter=max_iter, stephalving_maxiter=stephalving_max, tol=1e-8, verbose=TRUE)
 
 # Let's look at model fit
 for (c in countries) {
+  par(mfrow=c(1,2))
   c_idx <- (covid$country_name == c) & (covid$date >= "2022-05-01")
   c_dates <- covid$date[c_idx]
+  
+  # EPL
   lower <- mod_epl$fitted_values[c_idx] - 2*mod_epl$sd_estimates[c_idx]
   upper <- mod_epl$fitted_values[c_idx] + 2*mod_epl$sd_estimates[c_idx]
   lower_rev_upper <- c(lower, rev(upper))
   plot(c_dates, covid$new_confirmed[c_idx], type="n", ylim=range(lower_rev_upper),
-       main=c, xlab="Date", ylab="New Cases", cex=0.2)
+       main=paste("EPL:", c), xlab="Date", ylab="New Cases", cex=0.2)
   abline(v=cutoff_date, col=1, lty=2)
   text(cutoff_date-10, max(upper), "Train")
   text(cutoff_date+9, max(upper), "Test")
@@ -86,5 +96,24 @@ for (c in countries) {
     col="lightgray"
   )
   lines(c_dates, covid$new_confirmed[c_idx], type="l")
+  
+  # DLN
+  lower <- mod_dln_em$pred_lower_bounds[c_idx]
+  upper <- mod_dln_em$pred_upper_bounds[c_idx]
+  lower_rev_upper <- c(lower, rev(upper))
+  plot(c_dates, covid$new_confirmed[c_idx], type="n", ylim=range(lower_rev_upper),
+       main=paste("DLN:", c), xlab="Date", ylab="New Cases", cex=0.2)
+  abline(v=cutoff_date, col=1, lty=2)
+  text(cutoff_date-10, max(upper), "Train")
+  text(cutoff_date+9, max(upper), "Test")
+  polygon(
+    c(c_dates, rev(c_dates)),
+    c(lower, rev(upper)),
+    density=400,
+    col="lightgray"
+  )
+  lines(c_dates, covid$new_confirmed[c_idx], type="l")
+  
+  # Wait
   Sys.sleep(1)
 }

@@ -115,8 +115,10 @@ gradutils <- function(y, X, Z, beta, alpha) {
 }
 
 em_gradutils <- function(Z, sigma, v, alpha) {
-  grad <- t(Z) %*% (v/sigma^2 - 1)
-  hess <- -2 * crossprod(sqrt(v)/sigma * Z)
+  grad <- t(Z/n) %*% (v/sigma^2 - 1)
+  Z_over_sigma <- Z / sigma
+  hess <- -2 * t(Z_over_sigma) %*%  (v * Z_over_sigma / n)
+  hess <- (hess + t(hess)) / 2  # Ensure symmetry
   list(
     grad=grad,
     hess=hess
@@ -230,9 +232,26 @@ dln <- function(
       # Update beta
       gradutils_result <- gradutils(y, X, Z, beta, alpha)
       e1 <- gradutils_result$mu - gradutils_result$sigma * gradutils_result$kappa_0
-      beta <- solve(
+      beta_new <- solve(
         crossprod(X / gradutils_result$sigma),
         t(X) %*% (e1 / gradutils_result$sigma^2))
+      inc <- beta_new - beta
+      dev <- Inf
+      step <- 1
+      stephalving_iter <- 0
+      while (((dev >= dev_last) || (!is.finite(dev))) && (stephalving_iter <= stephalving_maxiter)) {
+        beta_new <- beta + step * inc
+        dev <- get_dev(beta_new, alpha)
+        if (verbose && (stephalving_iter > 0)) {
+          cat(
+            "Step-halving Iterations: ", stephalving_iter,
+            ", Deviance: ", dev,
+            "\n", sep="")
+        }
+        stephalving_iter <- stephalving_iter + 1
+        step <- step / 2
+      }
+      beta <- beta_new
       
       # Update alpha
       gradutils_result <- gradutils(y, X, Z, beta, alpha)  # Need to update these again
