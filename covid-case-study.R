@@ -27,6 +27,7 @@ countries_with_incomplete_data <- c(
 covid <- read.csv("./covid-data/covid.csv") %>% filter(
   region=="Europe",
   !(country_name %in% countries_with_incomplete_data), # Data issues
+  # country_name %in% c("Croatia", "Lithuania", "France"), # For testing
   # sub_region=="Western Europe",
   date >= "2020-07-01",
   date <  "2022-09-01"
@@ -37,6 +38,7 @@ covid$days_std <- scale(as.numeric(covid$date))
 
 # Look at some example time series
 countries <- sort(unique(covid$country_name))
+location_keys <- sort(unique(covid$location_key))
 for (c in countries) {
   covid_example <- filter(covid, country_name==c)
   plot(covid_example$date, covid_example$new_confirmed, type="l",
@@ -54,30 +56,94 @@ is_train <- covid$date < first_test_date
 is_test <- !is_train
 covid_train <- covid[is_train,]
 
-X_formula <- new_confirmed ~
-  as.factor(location_key) +
-  as.factor(location_key)*ns(days_std, 60) +
-  as.factor(location_key)*as.factor(weekdays(date))
-lm_X <- lm(X_formula, data=covid_train)
-X <- model.matrix(lm_X, data=covid_train)
-X_visuals <- model.matrix(lm_X, data=covid_visuals)
+get_ns_no_linear <- function(x, df=NULL) {
+  if (df < 4) stop("df must be >= 4")
+  x_max <- max(x)
+  x_min <- min(x)
+  x_range <- x_max - x_min
+  inc <- x_range / (df - 2)
+  ns_no_linear <- function(x_new, decorr_mat=NULL) {
+    X <- matrix(0, nrow=length(x_new), ncol=df)
+    X[,1] <- x_new
+    diff <- x_new - x_max
+    diff[diff > 0] <- 0
+    X[,2] <- diff^2
+    num_incs <- 0
+    for (j in seq(3, df)) {
+      start <- x_max - num_incs * inc
+      diff <- x_new - start
+      diff[diff > 0] <- 0
+      X[,j] <- diff^3
+      num_incs <- num_incs + 1
+    }
+    if (! is.null(decorr_mat)) {
+      decorr_mat <- cbind(x, decorr_mat)
+      for (j in seq(2, ncol(X))) {
+        prev_idx <- seq(j-1)
+        lm_mod <- lm(decorr_mat[,j] ~ decorr_mat[,prev_idx])
+        decorr_resids <- resid(lm_mod)
+        decorr_resid_sd <- sd(decorr_resids)
+        decorr_mat[,j] <- decorr_resids / decorr_resid_sd
+        lm_coefs <- coef(lm_mod)
+        X_resids <- X[,j] - lm_coefs[1] - as.matrix(X[,prev_idx]) %*% lm_coefs[-1]
+        X[,j] <- X_resids / decorr_resid_sd
+      }
+    }
+    X <- X[,seq(2, df)]  # Remove linear term
+    X
+  }
+  decorr_mat_ <- ns_no_linear(x)
+  function(x_new_) ns_no_linear(x_new_, decorr_mat_)
+}
 
-Z_formula <- new_confirmed ~
-  as.factor(location_key) +
-  as.factor(location_key)*ns(days_std, 20) +
-  as.factor(location_key)*as.factor(weekdays(date))
-lm_Z <- lm(Z_formula, data=covid_train)
-Z <- model.matrix(lm_Z, data=covid_train)
-Z_visuals <- model.matrix(lm_Z, data=covid_visuals)
+get_design_mat <- function(data, ns_func, loc_key_mod, lm_mod) {
+  X_spline <- ns_func(data$days_std)
+  dim_spline <- ncol(X_spline)
+  X_location_key <- model.matrix(loc_key_mod, data=data)
+  dim_location_key <- ncol(X_location_key)
+  X_loc_splines <- matrix(
+    0, nrow=nrow(data),
+    ncol=dim_spline*dim_location_key)
+  for (j in seq(dim_location_key)) {
+    idx <- (j-1)*dim_spline + seq(dim_spline)
+    X_loc_splines[,idx] <- X_spline * X_location_key[,j]
+  }
+  X_other <- model.matrix(lm_mod, data=data)
+  X <- cbind(X_other, X_loc_splines)
+  X
+}
+
+ns_x <- get_ns_no_linear(covid_train$days_std, 60)
+loc_key_mod <- lm(new_confirmed ~ 0 + as.factor(location_key), data=covid_train)
+X_formula <- new_confirmed ~
+  as.factor(paste0(location_key, ":", weekdays(date))) +
+  as.factor(paste0(location_key, ":", weekdays(date))):days_std
+lm_X <- lm(X_formula, data=covid_train)
+X <- get_design_mat(covid_train, ns_x, loc_key_mod, lm_X)
+# X_means <- apply(X, 2, mean)
+# X_sds <- apply(X, 2, sd)
+# X <- (X - X_means) / X_sds
+X_visuals <- get_design_mat(covid_visuals, ns_x, loc_key_mod, lm_X)
+# X_visuals <- (X_visuals - X_means) / X_sds
+
+ns_z <- get_ns_no_linear(covid_train$days_std, 20)
+Z <- get_design_mat(covid_train, ns_z, loc_key_mod, lm_X)
+# Z_means <- apply(Z, 2, mean)
+# Z_sds <- apply(Z, 2, sd)
+# Z <- (Z - Z_means) / Z_sds
+Z_visuals <- get_design_mat(covid_visuals, ns_z, loc_key_mod, lm_X)
+# Z_visuals <- (Z_visuals - Z_means) / Z_sds
 
 y <- covid_train$new_confirmed
 y_visuals <- covid_visuals$new_confirmed
 
 quasi_start_time <- Sys.time()
 mod_quasipois <- glm(y ~ 0 + X, family=quasipoisson())
+mean(is.na(mod_quasipois$coefficients))
+mod_quasipois$coefficients[is.na(mod_quasipois$coefficients)]
 quasi_end_time <- Sys.time()
 quasi_elapsed_time <- quasi_end_time - quasi_start_time
-print(quasi_elapsed_time)
+cat("Elapsed time: "); print(quasi_elapsed_time)
 
 beta_start <- mod_quasipois$coefficients
 alpha_start <- rep(0, ncol(Z))
@@ -90,9 +156,9 @@ tol <- 1e-4  # The fit changes very little after this point
 stephalving_max <- 50
 mod_epl <- epl(y, X, Z, betastart = beta_start, alphastart = alpha_start, Xnew=X_visuals, Znew=Z_visuals,
                tol=tol, max_iter=max_iter, stephalving_maxiter=stephalving_max, verbose=TRUE)
-cat("Fit time: ", mod_epl$fit_time, "\n")
-cat("Inference time: ", mod_epl$inference_time, "\n")
-cat("Elapsed time: ", mod_epl$elapsed_time, "\n")
+cat("Fit time: "); print(mod_epl$fit_time)
+cat("Inference time: "); print(mod_epl$inference_time)
+cat("Elapsed time: "); print(mod_epl$elapsed_time)
 gc()
 
 # The EM algorithm works great!
@@ -104,9 +170,10 @@ alpha_start_dln[1] <- log(sd(y) / mean(y))
 mod_dln_em <- dln(y, X, Z, betastart = beta_start_dln, alphastart = alpha_start_dln, method="EM",
                         pred_interval_method="Asymp. Bayes", Xnew=X_visuals, Znew=Z_visuals,
                         max_iter=max_iter, stephalving_maxiter=stephalving_max, tol=tol, verbose=TRUE)
-cat("Fit time: ", mod_dln_em$fit_time, "\n")
-cat("Inference time: ", mod_dln_em$inference_time, "\n")
-cat("Elapsed time: ", mod_dln_em$elapsed_time, "\n")
+cat("Fit time: "); (mod_dln_em$fit_time)
+cat("Inference time: "); print(mod_dln_em$inference_time)
+cat("Inference time: "); print(mod_dln_em$pred_interval_time)
+cat("Elapsed time: "); print(mod_dln_em$elapsed_time)
 gc()
 
 # This one is prone to getting stuck
@@ -120,56 +187,65 @@ gc()
 # cat("Elapsed time: ", mod_dln_em$elapsed_time, "\n")
 
 # Let's look at model fit
-for (c in countries) {
-  par(mfrow=c(1,2))
-  c_idx <- covid_visuals$country_name == c
-  c_dates <- covid_visuals$date[c_idx]
-  
-  # EPL
-  lower <- mod_epl$fitted_values[c_idx] - 2*mod_epl$sd_estimates[c_idx]
-  upper <- mod_epl$fitted_values[c_idx] + 2*mod_epl$sd_estimates[c_idx]
-  lower_rev_upper <- c(lower, rev(upper))
-  plot(c_dates, covid_visuals$new_confirmed[c_idx], type="n", ylim=range(lower_rev_upper),
-       main=paste("EPL:", c), xlab="Date", ylab="New Cases", cex=0.2)
-  abline(v=first_test_date, col=1, lty=2)
-  text(first_test_date-10, max(upper), "Train")
-  text(first_test_date+9, max(upper), "Test")
-  polygon(
-    c(c_dates, rev(c_dates)),
-    c(lower, rev(upper)),
-    density=400,
-    col="lightgray"
-  )
-  lines(c_dates, covid_visuals$new_confirmed[c_idx], type="l")
-  
-  # DLN
-  lower <- mod_dln_em$pred_lower_bounds[c_idx]
-  upper <- mod_dln_em$pred_upper_bounds[c_idx]
-  lower_rev_upper <- c(lower, rev(upper))
-  plot(c_dates, covid_visuals$new_confirmed[c_idx], type="n", ylim=range(lower_rev_upper),
-       main=paste("DLN:", c), xlab="Date", ylab="New Cases", cex=0.2)
-  abline(v=first_test_date, col=1, lty=2)
-  text(first_test_date-10, max(upper), "Train")
-  text(first_test_date+9, max(upper), "Test")
-  polygon(
-    c(c_dates, rev(c_dates)),
-    c(lower, rev(upper)),
-    density=400,
-    col="lightgray"
-  )
-  lines(c_dates, covid_visuals$new_confirmed[c_idx], type="l")
-  
-  # Wait
-  Sys.sleep(0.2)
+plot_country_fits <- function(country_vec) {
+  for (c in country_vec) {
+    par(mfrow=c(1,2))
+    c_idx <- covid_visuals$country_name == c
+    c_dates <- covid_visuals$date[c_idx]
+    
+    # EPL
+    lower <- mod_epl$fitted_values[c_idx] - 2*mod_epl$sd_estimates[c_idx]
+    upper <- mod_epl$fitted_values[c_idx] + 2*mod_epl$sd_estimates[c_idx]
+    lower_rev_upper <- c(lower, rev(upper))
+    plot(c_dates, covid_visuals$new_confirmed[c_idx], type="n", ylim=range(lower_rev_upper),
+         main=paste("EPL:", c), xlab="Date", ylab="New Cases", cex=0.2)
+    abline(v=first_test_date, col=1, lty=2)
+    text(first_test_date-5, max(upper), adj=c(1, 1), "Train-Test\nCutoff")
+    polygon(
+      c(c_dates, rev(c_dates)),
+      c(lower, rev(upper)),
+      density=400,
+      col="lightgray"
+    )
+    lines(c_dates, covid_visuals$new_confirmed[c_idx], type="l")
+    
+    # DLN
+    lower <- mod_dln_em$pred_lower_bounds[c_idx]
+    upper <- mod_dln_em$pred_upper_bounds[c_idx]
+    lower_rev_upper <- c(lower, rev(upper))
+    plot(c_dates, covid_visuals$new_confirmed[c_idx], type="n", ylim=range(lower_rev_upper),
+         main=paste("DLN:", c), xlab="Date", ylab="New Cases", cex=0.2)
+    abline(v=first_test_date, col=1, lty=2)
+    text(first_test_date-5, max(upper), adj=c(1, 1), "Train-Test\nCutoff")
+    polygon(
+      c(c_dates, rev(c_dates)),
+      c(lower, rev(upper)),
+      density=400,
+      col="lightgray"
+    )
+    lines(c_dates, covid_visuals$new_confirmed[c_idx], type="l")
+    
+    # Wait
+    Sys.sleep(0.5)
+  }
 }
 
-# How does the out-of-sample coverage look?
+plot_country_fits(countries)
+
+# Save fitted values/preds to dataframe
+covid_visuals$epl_fitted_values <- mod_epl$fitted_values
+covid_visuals$epl_var_estimates <- mod_epl$var_estimates
+covid_visuals$dln_fitted_values <- mod_dln_em$fitted_values
+covid_visuals$dln_var_estimates <- mod_dln_em$sd_estimates^2
 covid_visuals$y_pred_lower <- mod_dln_em$pred_lower_bounds
 covid_visuals$y_pred_upper <- mod_dln_em$pred_upper_bounds
 covid_visuals$is_test <- covid_visuals$date >= first_test_date
 covid_test <- covid_visuals[covid_visuals$is_test,]
-covid_test$y_covered <- (covid_test$y_pred_lower <= covid_test$new_confirmed) &
-  (covid_test$new_confirmed <= covid_test$y_pred_upper)
+covid_test$y_true <- covid_test$new_confirmed
+
+# How does the out-of-sample coverage look?
+covid_test$y_covered <- (covid_test$y_pred_lower <= covid_test$y_true) &
+  (covid_test$y_true <= covid_test$y_pred_upper)
 coverage_by_country <- covid_test %>%
   group_by(country_name) %>%
   summarise(coverage=mean(y_covered))
@@ -180,3 +256,49 @@ cat(
   percent(marginal_coverage, accuracy = 0.1),
   " (", percent(marginal_coverage_se, accuracy = 0.1), ")",
   sep="")
+
+# Comparison of EPL vs. DLN across some predictive metrics
+mae_by_country <- covid_test %>%
+  group_by(country_name) %>%
+  summarise(
+    epl_mae = mean(abs(epl_fitted_values - y_true)),
+    dln_mae = mean(abs(dln_fitted_values - y_true))
+  )
+avg_by_country <- covid_visuals %>%
+  filter(!is_test) %>%
+  group_by(country_name) %>%
+  summarise(mean_new_confirmed=mean(new_confirmed))
+smae_by_country <- inner_join(mae_by_country, avg_by_country, by="country_name") %>%
+  mutate(
+    epl_smae = epl_mae / mean_new_confirmed,
+    dln_smae = dln_mae / mean_new_confirmed
+  )
+dev.off()
+boxplot(smae_by_country$epl_smae, smae_by_country$dln_smae, log="y",
+        xlab="Method", ylab="SMAE", names=c("EPL", "DLN")
+)
+# Differences
+smae_by_country$smae_dln_minus_epl <- smae_by_country$dln_smae - smae_by_country$epl_smae
+hist(smae_by_country$smae_dln_minus_epl, breaks=10, xlab="Difference in SMAE (DLN - EPL)", main="",
+     ylim=c(0, 20), xlim=c(-0.1, 1.5))
+for (i in seq(nrow(smae_by_country))) {
+  row <- smae_by_country[i,]
+  if (abs(row$smae_dln_minus_epl) > 0.2) {
+    text(row$smae_dln_minus_epl, 3, labels=row$country_name)
+  }
+}
+
+# Show fits for these two countries
+plot_country_fits(c("Lithuania", "Croatia"))
+# These predictions blew up
+
+# Overall metrics
+epl_smae_avg <- mean(smae_by_country$epl_smae)
+epl_smae_se <- sd(smae_by_country$epl_smae) / nrow(smae_by_country)
+dln_smae_avg <- mean(smae_by_country$dln_smae)
+dln_smae_se <- sd(smae_by_country$dln_smae) / nrow(smae_by_country)
+smae_by_country$diff_smae <- smae_by_country$epl_smae - smae_by_country$dln_smae
+diff_smae_avg <- mean(smae_by_country$diff_smae)
+diff_smae_se <- sd(smae_by_country$diff_smae) / nrow(smae_by_country)
+# A lot of this difference is driven by Croatia
+

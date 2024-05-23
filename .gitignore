@@ -9,3 +9,4 @@ test-other-packages.R
 other-packages.R
 .DS_Store
 covid-data/
+case-study-results.RData

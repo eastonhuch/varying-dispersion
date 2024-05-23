@@ -1,4 +1,5 @@
 # Code for implementing the moment-based methods
+solve_tol <- .Machine$double.eps
 
 # epl: pseudolikelihood model
 epl <- function(y, X, Z, betastart, alphastart, Xnew=NULL, Znew=NULL, tol=1e-8, max_iter=100, stephalving_maxiter=10, verbose=FALSE) {
@@ -89,7 +90,7 @@ epl <- function(y, X, Z, betastart, alphastart, Xnew=NULL, Znew=NULL, tol=1e-8, 
     # Update params
     grad <- get_grad(beta, alpha)
     hess <- get_hess(beta, alpha)
-    inc <- solve(hess, grad)
+    inc <- solve(hess, grad, tol=solve_tol)
     dev <- Inf
     step <- 1
     stephalving_iter <- 0
@@ -120,7 +121,7 @@ epl <- function(y, X, Z, betastart, alphastart, Xnew=NULL, Znew=NULL, tol=1e-8, 
   row_grads <- get_row_grads(beta, alpha) / n
   hess <- get_hess(beta, alpha)
   meat <- crossprod(row_grads)
-  half_sandwich <- solve(hess, t(chol(meat)))
+  half_sandwich <- solve(hess, t(chol(meat)), tol=solve_tol)
   sandwich <- tcrossprod(half_sandwich)
   
   # Save basic results
