@@ -56,87 +56,25 @@ is_train <- covid$date < first_test_date
 is_test <- !is_train
 covid_train <- covid[is_train,]
 
-get_ns_no_linear <- function(x, df=NULL) {
-  if (df < 4) stop("df must be >= 4")
-  x_max <- max(x)
-  x_min <- min(x)
-  x_range <- x_max - x_min
-  inc <- x_range / (df - 2)
-  ns_no_linear <- function(x_new, decorr_mat=NULL) {
-    X <- matrix(0, nrow=length(x_new), ncol=df)
-    X[,1] <- x_new
-    diff <- x_new - x_max
-    diff[diff > 0] <- 0
-    X[,2] <- diff^2
-    num_incs <- 0
-    for (j in seq(3, df)) {
-      start <- x_max - num_incs * inc
-      diff <- x_new - start
-      diff[diff > 0] <- 0
-      X[,j] <- diff^3
-      num_incs <- num_incs + 1
-    }
-    if (! is.null(decorr_mat)) {
-      decorr_mat <- cbind(x, decorr_mat)
-      for (j in seq(2, ncol(X))) {
-        prev_idx <- seq(j-1)
-        lm_mod <- lm(decorr_mat[,j] ~ decorr_mat[,prev_idx])
-        decorr_resids <- resid(lm_mod)
-        decorr_resid_sd <- sd(decorr_resids)
-        decorr_mat[,j] <- decorr_resids / decorr_resid_sd
-        lm_coefs <- coef(lm_mod)
-        X_resids <- X[,j] - lm_coefs[1] - as.matrix(X[,prev_idx]) %*% lm_coefs[-1]
-        X[,j] <- X_resids / decorr_resid_sd
-      }
-    }
-    X <- X[,seq(2, df)]  # Remove linear term
-    X
-  }
-  decorr_mat_ <- ns_no_linear(x)
-  function(x_new_) ns_no_linear(x_new_, decorr_mat_)
-}
-
-get_design_mat <- function(data, ns_func, loc_key_mod, lm_mod) {
-  X_spline <- ns_func(data$days_std)
-  dim_spline <- ncol(X_spline)
-  X_location_key <- model.matrix(loc_key_mod, data=data)
-  dim_location_key <- ncol(X_location_key)
-  X_loc_splines <- matrix(
-    0, nrow=nrow(data),
-    ncol=dim_spline*dim_location_key)
-  for (j in seq(dim_location_key)) {
-    idx <- (j-1)*dim_spline + seq(dim_spline)
-    X_loc_splines[,idx] <- X_spline * X_location_key[,j]
-  }
-  X_other <- model.matrix(lm_mod, data=data)
-  X <- cbind(X_other, X_loc_splines)
-  X
-}
-
-ns_x <- get_ns_no_linear(covid_train$days_std, 60)
-loc_key_mod <- lm(new_confirmed ~ 0 + as.factor(location_key), data=covid_train)
-X_formula <- new_confirmed ~
+# Get design matrices
+X_formula <- new_confirmed ~ 
   as.factor(paste0(location_key, ":", weekdays(date))) +
-  as.factor(paste0(location_key, ":", weekdays(date))):days_std
-lm_X <- lm(X_formula, data=covid_train)
-X <- get_design_mat(covid_train, ns_x, loc_key_mod, lm_X)
-# X_means <- apply(X, 2, mean)
-# X_sds <- apply(X, 2, sd)
-# X <- (X - X_means) / X_sds
-X_visuals <- get_design_mat(covid_visuals, ns_x, loc_key_mod, lm_X)
-# X_visuals <- (X_visuals - X_means) / X_sds
+  as.factor(location_key):ns(days_std, 50)
+X_mod <- lm(X_formula, data=covid_train)
+X <- model.matrix(X_mod, data=covid_train)
+X_visuals <- model.matrix(X_mod, data=covid_visuals)
 
-ns_z <- get_ns_no_linear(covid_train$days_std, 20)
-Z <- get_design_mat(covid_train, ns_z, loc_key_mod, lm_X)
-# Z_means <- apply(Z, 2, mean)
-# Z_sds <- apply(Z, 2, sd)
-# Z <- (Z - Z_means) / Z_sds
-Z_visuals <- get_design_mat(covid_visuals, ns_z, loc_key_mod, lm_X)
-# Z_visuals <- (Z_visuals - Z_means) / Z_sds
+Z_formula <- new_confirmed ~ 
+  as.factor(paste0(location_key, ":", weekdays(date))) +
+  as.factor(location_key):ns(days_std, 12)
+Z_mod <- lm(Z_formula, data=covid_train)
+Z <- model.matrix(Z_mod, data=covid_train)
+Z_visuals <- model.matrix(Z_mod, data=covid_visuals)
 
 y <- covid_train$new_confirmed
 y_visuals <- covid_visuals$new_confirmed
 
+# Fit Quasipoisson model
 quasi_start_time <- Sys.time()
 mod_quasipois <- glm(y ~ 0 + X, family=quasipoisson())
 mean(is.na(mod_quasipois$coefficients))
