@@ -169,6 +169,7 @@ plot_country_fits <- function(country_vec) {
 }
 
 plot_country_fits(countries)
+dev.off()
 
 # Save fitted values/preds to dataframe
 covid_visuals$epl_fitted_values <- mod_epl$fitted_values
@@ -196,47 +197,109 @@ cat(
   sep="")
 
 # Comparison of EPL vs. DLN across some predictive metrics
-mae_by_country <- covid_test %>%
+country_bias_mae <- covid_test %>%
+  mutate(
+    epl_error = epl_fitted_values - y_true,
+    dln_error = dln_fitted_values - y_true
+  ) %>%
   group_by(country_name) %>%
   summarise(
-    epl_mae = mean(abs(epl_fitted_values - y_true)),
-    dln_mae = mean(abs(dln_fitted_values - y_true))
+    epl_bias=mean(epl_error),
+    epl_mae=mean(abs(epl_error)),
+    dln_bias=mean(dln_error),
+    dln_mae=mean(abs(dln_error))
   )
+
 avg_by_country <- covid_visuals %>%
   filter(!is_test) %>%
   group_by(country_name) %>%
   summarise(mean_new_confirmed=mean(new_confirmed))
-smae_by_country <- inner_join(mae_by_country, avg_by_country, by="country_name") %>%
+country_bias_mae_percents <- inner_join(country_bias_mae, avg_by_country, by="country_name") %>%
   mutate(
-    epl_smae = epl_mae / mean_new_confirmed,
-    dln_smae = dln_mae / mean_new_confirmed
+    epl_mae_percent = epl_mae / mean_new_confirmed,
+    epl_bias_percent = epl_bias / mean_new_confirmed,
+    dln_mae_percent = dln_mae / mean_new_confirmed,
+    dln_bias_percent = dln_bias / mean_new_confirmed,
+    diff_mae_percent = dln_mae_percent - epl_mae_percent,
+    diff_bias_percent = dln_bias_percent - epl_bias_percent
   )
-dev.off()
-boxplot(smae_by_country$epl_smae, smae_by_country$dln_smae, log="y",
-        xlab="Method", ylab="SMAE", names=c("EPL", "DLN")
-)
-# Differences
-smae_by_country$smae_dln_minus_epl <- smae_by_country$dln_smae - smae_by_country$epl_smae
-hist(smae_by_country$smae_dln_minus_epl, breaks=10, xlab="Difference in SMAE (DLN - EPL)", main="",
-     ylim=c(0, 20), xlim=c(-0.1, 1.5))
-for (i in seq(nrow(smae_by_country))) {
-  row <- smae_by_country[i,]
-  if (abs(row$smae_dln_minus_epl) > 0.2) {
-    text(row$smae_dln_minus_epl, 3, labels=row$country_name)
-  }
-}
 
-# Show fits for these two countries
-plot_country_fits(c("Lithuania", "Croatia"))
-# These predictions blew up
+pdf("./figures/case-mae.pdf", width=4, height=4)
+par(mai=c(0.8, 0.9, 0.1, 0.1), cex.lab=1.4, cex.axis=1.1)
+boxplot(country_bias_mae_percents$epl_mae_percent, country_bias_mae_percents$dln_mae_percent,
+        xlab="Method", ylab="% MAE", names=c("EPL", "DLN"), yaxt="n"
+)
+yaxt_mae <- seq(0, 1.25, 0.25)
+axis(2, at=yaxt_mae, lab=percent(yaxt_mae))
+dev.off()
+
+pdf("./figures/case-bias.pdf", width=4, height=4)
+par(mai=c(0.8, 0.9, 0.1, 0.1), cex.lab=1.4, cex.axis=1.1)
+boxplot(country_bias_mae_percents$epl_bias_percent, country_bias_mae_percents$dln_bias_percent,
+        xlab="Method", ylab="% Bias", names=c("EPL", "DLN"), yaxt="n"
+)
+yaxt_bias <- seq(-0.25, 0.75, 0.25)
+axis(2, at=yaxt_bias, lab=percent(yaxt_bias))
+dev.off()
+
+pdf("./figures/case-diff.pdf", width=4, height=4)
+par(mai=c(0.8, 0.9, 0.1, 0.1), cex.lab=1.4, cex.axis=1.1)
+boxplot(country_bias_mae_percents$diff_mae_percent, country_bias_mae_percents$diff_bias_percent,
+        xlab="Performance Metric", ylab="Difference (DLN - EPL)", names=c("% MAE", "% Bias"), yaxt="n"
+)
+yaxt_diff <- seq(-0.15, 0.3, 0.15)
+axis(2, at=yaxt_diff, lab=percent(yaxt_diff))
+dev.off()
 
 # Overall metrics
-epl_smae_avg <- mean(smae_by_country$epl_smae)
-epl_smae_se <- sd(smae_by_country$epl_smae) / nrow(smae_by_country)
-dln_smae_avg <- mean(smae_by_country$dln_smae)
-dln_smae_se <- sd(smae_by_country$dln_smae) / nrow(smae_by_country)
-smae_by_country$diff_smae <- smae_by_country$epl_smae - smae_by_country$dln_smae
-diff_smae_avg <- mean(smae_by_country$diff_smae)
-diff_smae_se <- sd(smae_by_country$diff_smae) / nrow(smae_by_country)
-# A lot of this difference is driven by Croatia
+epl_bias_percent <- mean(country_bias_mae_percents$epl_bias_percent)
+epl_bias_percent_se <- sd(country_bias_mae_percents$epl_bias_percent) / nrow(country_bias_mae_percents)
+dln_bias_percent <- mean(country_bias_mae_percents$dln_bias_percent)
+dln_bias_percent_se <- sd(country_bias_mae_percents$dln_bias_percent) / nrow(country_bias_mae_percents)
+diff_bias_percent <- mean(country_bias_mae_percents$diff_bias_percent)
+diff_bias_percent_se <- sd(country_bias_mae_percents$diff_bias_percent) / nrow(country_bias_mae_percents)
 
+epl_mae_percent <- mean(country_bias_mae_percents$epl_mae_percent)
+epl_mae_percent_se <- sd(country_bias_mae_percents$epl_mae_percent) / nrow(country_bias_mae_percents)
+dln_mae_percent <- mean(country_bias_mae_percents$dln_mae_percent)
+dln_mae_percent_se <- sd(country_bias_mae_percents$dln_mae_percent) / nrow(country_bias_mae_percents)
+diff_mae_percent <- mean(country_bias_mae_percents$diff_mae_percent)
+diff_mae_percent_se <- sd(country_bias_mae_percents$diff_mae_percent) / nrow(country_bias_mae_percents)
+
+percent_accuracy <- 0.1
+make_result_vec <- function(b, b_se, m, m_se, fit_time="N/A", acc=0.1) {
+  if (!is.character(fit_time)) {
+    fit_time <- sprintf("%.2f", as.numeric(fit_time))
+  }
+  c(
+    paste0(percent(b, accuracy=acc), " (", percent(b_se, accuracy=acc), ")"),
+    paste0(percent(m, accuracy=acc), " (", percent(m_se, accuracy=acc), ")"),
+    fit_time
+  )
+}
+epl_result_vec <- make_result_vec(
+  epl_bias_percent, epl_bias_percent_se,
+  epl_mae_percent, epl_mae_percent_se,
+  mod_epl$elapsed_time)
+dln_result_vec <- make_result_vec(
+  dln_bias_percent, dln_bias_percent_se,
+  dln_mae_percent, dln_mae_percent_se,
+  mod_dln_em$elapsed_time)
+diff_result_vec <- make_result_vec(
+  diff_bias_percent, diff_bias_percent_se,
+  diff_mae_percent, diff_mae_percent_se)
+
+result_table <- data.frame(
+  EPL=epl_result_vec,
+  DLN=dln_result_vec,
+  Difference=diff_result_vec
+)
+row.names(result_table) <- c("Bias %", "MAE %", "Elapsed Time (Minutes)")
+
+xtable(
+  result_table,
+  align="lrrr",
+  label="tab:pred_case",
+  caption="Performance comparison of the extended pseudo-likelihood (EPL) and discrete log-normal (DLN) models in predicting COVID case counts for 27 European countries. The DLN method exhibits slightly more bias, lower MAE, and a shorter model-fitting time. Figure \ref{fig:case_performance} plots the country-level data."
+) %>%
+  print()
