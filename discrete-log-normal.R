@@ -129,7 +129,7 @@ em_gradutils <- function(Z, sigma, v, alpha) {
 dln <- function(
   y, X, Z, betastart, alphastart, method="Newton", pred_interval_method="None", Xnew=NULL, Znew=NULL,
   prior_mean=NULL, prior_precision=NULL, # NOTE: These are only used for pred intervals with Full Bayes
-  max_iter = 100, stephalving_maxiter=10, tol=1e-8, verbose=TRUE) {
+  max_iter = 100, stephalving_maxiter=10, tol=1e-8, skip_inference=FALSE, verbose=TRUE) {
   
   # Initialize some values
   start_time <- Sys.time()
@@ -236,22 +236,27 @@ dln <- function(
       e1 <- gradutils_result$mu - gradutils_result$sigma * gradutils_result$kappa_0
       beta_new <- solve(
         crossprod(X / gradutils_result$sigma),
-        t(X) %*% (e1 / gradutils_result$sigma^2))
+        t(X) %*% (e1 / gradutils_result$sigma^2), tol=1e-40)
       inc <- beta_new - beta
       dev <- Inf
       step <- 1
       stephalving_iter <- 0
-      while (((dev >= dev_last) || (!is.finite(dev))) && (stephalving_iter <= stephalving_maxiter)) {
-        beta_new <- beta + step * inc
-        dev <- get_dev(beta_new, alpha)
-        if (verbose && (stephalving_iter > 0)) {
-          cat(
-            "Step-halving Iterations: ", stephalving_iter,
-            ", Deviance: ", dev,
-            "\n", sep="")
+      if (all(is.finite(inc))) {
+        while (((dev >= dev_last) || (!is.finite(dev))) && (stephalving_iter <= stephalving_maxiter)) {
+          beta_new <- beta + step * inc
+          dev <- get_dev(beta_new, alpha)
+          if (verbose && (stephalving_iter > 0)) {
+            cat(
+              "Step-halving Iterations: ", stephalving_iter,
+              ", Deviance: ", dev,
+              "\n", sep="")
+          }
+          stephalving_iter <- stephalving_iter + 1
+          step <- step / 2
         }
-        stephalving_iter <- stephalving_iter + 1
-        step <- step / 2
+      } else {
+        beta_new <- beta
+        dev <- get_dev(beta_new, alpha)
       }
       beta <- beta_new
       
@@ -270,17 +275,22 @@ dln <- function(
       dev <- Inf
       step <- 1
       stephalving_iter <- 0
-      while (((dev >= dev_last) || (!is.finite(dev))) && (stephalving_iter <= stephalving_maxiter)) {
-        alpha_new <- alpha - step * inc
-        dev <- get_dev(beta, alpha_new)
-        if (verbose && (stephalving_iter > 0)) {
-          cat(
-            "Step-halving Iterations: ", stephalving_iter,
-            ", Deviance: ", dev,
-            "\n", sep="")
+      if (all(is.finite(inc))) {
+        while (((dev >= dev_last) || (!is.finite(dev))) && (stephalving_iter <= stephalving_maxiter)) {
+          alpha_new <- alpha - step * inc
+          dev <- get_dev(beta, alpha_new)
+          if (verbose && (stephalving_iter > 0)) {
+            cat(
+              "Step-halving Iterations: ", stephalving_iter,
+              ", Deviance: ", dev,
+              "\n", sep="")
+          }
+          stephalving_iter <- stephalving_iter + 1
+          step <- step / 2
         }
-        stephalving_iter <- stephalving_iter + 1
-        step <- step / 2
+      } else {
+        alpha_new <- alpha
+        dev <- get_dev(beta, alpha_new)
       }
       alpha <- alpha_new
       theta <- c(beta, alpha)
@@ -296,57 +306,63 @@ dln <- function(
   result_list$beta <- beta
   result_list$alpha <- alpha
   result_list$theta <- theta
+  result_list$dev <- n*dev
+  result_list$logLik <- -result_list$dev/2
+  result_list$aic <- result_list$dev + 2*(p+q)
+  result_list$bic <- result_list$dev + log(n)*(p+q)
   end_fit_time <- Sys.time()
-  if (verbose) print("Finished model fitting; beginning inference")
-  
-  # Covariance matrix
-  # Try to estimate based on observed information
-  result_list$covariance_via_score <- FALSE
-  try({
-    hess <- get_hess(beta, alpha)
-    result_list$cov_theta <- chol2inv(chol(-hess)) / n
-  }, silent=TRUE)
-  
-  # If needed, estimate based on score function: This one is (almost) always invertible
-  if (is.null(result_list$cov_theta)) {
-    result_list$covariance_via_score <- TRUE
-    grad_matrix <- get_grad_matrix(beta, alpha)
-    result_list$cov_theta <- chol2inv(chol(crossprod(grad_matrix)))
+  if (!skip_inference) {
+    if (verbose) print("Finished model fitting; beginning inference")
+    
+    # Covariance matrix
+    # Try to estimate based on observed information
+    result_list$covariance_via_score <- FALSE
+    try({
+      hess <- get_hess(beta, alpha)
+      result_list$cov_theta <- chol2inv(chol(-hess)) / n
+    }, silent=TRUE)
+    
+    # If needed, estimate based on score function: This one is (almost) always invertible
+    if (is.null(result_list$cov_theta)) {
+      result_list$covariance_via_score <- TRUE
+      grad_matrix <- get_grad_matrix(beta, alpha)
+      result_list$cov_theta <- chol2inv(chol(crossprod(grad_matrix)))
+    }
+    
+    # Store individual covariance matrices
+    result_list$cov_beta <- result_list$cov_theta[beta_idx, beta_idx]
+    result_list$cov_alpha <- result_list$cov_theta[alpha_idx, alpha_idx]
+    
+    # Fitted values
+    if (is.null(Xnew)) Xnew <- X
+    if (is.null(Znew)) Znew <- Z
+    z_mu <- drop(Xnew %*% beta)
+    z_sigma <- drop(exp(Znew %*% alpha))
+    result_list$fitted_values <- integrate_dln(z_mu, z_sigma, 1)
+    mean_mu_derivs <- integrate_dln(z_mu, z_sigma, 1, calc_deriv=TRUE, wrt_mu=TRUE)
+    mean_sigma_derivs <- integrate_dln(z_mu, z_sigma, 1, calc_deriv=TRUE, wrt_mu=FALSE)
+    mean_beta_grads <- mean_mu_derivs * Xnew
+    mean_alpha_grads <- mean_sigma_derivs * z_sigma * Znew
+    mean_theta_grads <- cbind(mean_beta_grads, mean_alpha_grads)
+    fitted_ses <- sqrt(rowSums((mean_theta_grads %*% result_list$cov_theta) * mean_theta_grads))
+    result_list$fitted_lower_bounds <- result_list$fitted_values - 1.96 * fitted_ses
+    result_list$fitted_upper_bounds <- result_list$fitted_values + 1.96 * fitted_ses
+    result_list$fitted_interval_widths <- result_list$fitted_upper_bounds - result_list$fitted_lower_bounds
+    
+    # Standard deviations
+    fitted_second_moments <- integrate_dln(z_mu, z_sigma, 2)
+    var_estimates <- fitted_second_moments - result_list$fitted_values^2
+    result_list$sd_estimates <- sqrt(var_estimates)
+    moment2_mu_derivs <- integrate_dln(z_mu, z_sigma, 2, calc_deriv=TRUE, wrt_mu=TRUE)
+    moment2_sigma_derivs <- integrate_dln(z_mu, z_sigma, 2, calc_deriv=TRUE, wrt_mu=FALSE)
+    sd_beta_grads <- 1 / (2 * result_list$sd_estimates) * (moment2_mu_derivs - 2 * result_list$fitted_values * mean_mu_derivs) * Xnew
+    sd_alpha_grads <- 1 / (2 * result_list$sd_estimates) * (moment2_sigma_derivs - 2 * result_list$fitted_values * mean_sigma_derivs) * z_sigma * Znew
+    sd_theta_grads <- cbind(sd_beta_grads, sd_alpha_grads)
+    sd_ses <- sqrt(rowSums((sd_theta_grads %*% result_list$cov_theta) * sd_theta_grads))
+    result_list$sd_lower_bounds <- result_list$sd_estimates - 1.96 * sd_ses
+    result_list$sd_upper_bounds <- result_list$sd_estimates + 1.96 * sd_ses
+    result_list$sd_interval_widths <- result_list$sd_upper_bounds - result_list$sd_lower_bounds
   }
-  
-  # Store individual covariance matrices
-  result_list$cov_beta <- result_list$cov_theta[beta_idx, beta_idx]
-  result_list$cov_alpha <- result_list$cov_theta[alpha_idx, alpha_idx]
-  
-  # Fitted values
-  if (is.null(Xnew)) Xnew <- X
-  if (is.null(Znew)) Znew <- Z
-  z_mu <- drop(Xnew %*% beta)
-  z_sigma <- drop(exp(Znew %*% alpha))
-  result_list$fitted_values <- integrate_dln(z_mu, z_sigma, 1)
-  mean_mu_derivs <- integrate_dln(z_mu, z_sigma, 1, calc_deriv=TRUE, wrt_mu=TRUE)
-  mean_sigma_derivs <- integrate_dln(z_mu, z_sigma, 1, calc_deriv=TRUE, wrt_mu=FALSE)
-  mean_beta_grads <- mean_mu_derivs * Xnew
-  mean_alpha_grads <- mean_sigma_derivs * z_sigma * Znew
-  mean_theta_grads <- cbind(mean_beta_grads, mean_alpha_grads)
-  fitted_ses <- sqrt(rowSums((mean_theta_grads %*% result_list$cov_theta) * mean_theta_grads))
-  result_list$fitted_lower_bounds <- result_list$fitted_values - 1.96 * fitted_ses
-  result_list$fitted_upper_bounds <- result_list$fitted_values + 1.96 * fitted_ses
-  result_list$fitted_interval_widths <- result_list$fitted_upper_bounds - result_list$fitted_lower_bounds
-  
-  # Standard deviations
-  fitted_second_moments <- integrate_dln(z_mu, z_sigma, 2)
-  var_estimates <- fitted_second_moments - result_list$fitted_values^2
-  result_list$sd_estimates <- sqrt(var_estimates)
-  moment2_mu_derivs <- integrate_dln(z_mu, z_sigma, 2, calc_deriv=TRUE, wrt_mu=TRUE)
-  moment2_sigma_derivs <- integrate_dln(z_mu, z_sigma, 2, calc_deriv=TRUE, wrt_mu=FALSE)
-  sd_beta_grads <- 1 / (2 * result_list$sd_estimates) * (moment2_mu_derivs - 2 * result_list$fitted_values * mean_mu_derivs) * Xnew
-  sd_alpha_grads <- 1 / (2 * result_list$sd_estimates) * (moment2_sigma_derivs - 2 * result_list$fitted_values * mean_sigma_derivs) * z_sigma * Znew
-  sd_theta_grads <- cbind(sd_beta_grads, sd_alpha_grads)
-  sd_ses <- sqrt(rowSums((sd_theta_grads %*% result_list$cov_theta) * sd_theta_grads))
-  result_list$sd_lower_bounds <- result_list$sd_estimates - 1.96 * sd_ses
-  result_list$sd_upper_bounds <- result_list$sd_estimates + 1.96 * sd_ses
-  result_list$sd_interval_widths <- result_list$sd_upper_bounds - result_list$sd_lower_bounds
   if (verbose) print("Finished inference; beginning creation of prediction intervals")
   
   # Prediction intervals

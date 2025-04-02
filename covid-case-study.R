@@ -1,8 +1,8 @@
 # COVID Case Study
 require(tidyverse)
 require(xtable)
-require(mpcmp)
-require(cmp)
+# require(mpcmp)
+# require(cmp)
 require(scales)
 require(splines)
 source("cmp-helpers.R")

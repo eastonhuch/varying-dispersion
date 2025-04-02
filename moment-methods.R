@@ -144,11 +144,22 @@ epl <- function(y, X, Z, betastart, alphastart, Xnew=NULL, Znew=NULL, tol=1e-8, 
   result_list$fitted_upper_bounds <- mu + 1.96 * fitted_ses
   result_list$fitted_interval_widths <- result_list$fitted_upper_bounds - result_list$fitted_lower_bounds
   
+  # Estimated phis
+  log_phi <- c(Znew %*% alpha)
+  result_list$log_phi <- log_phi
+  phi <- exp(log_phi)
+  result_list$phi <- phi
+  
+  # Confidence intervals for log_phis
+  log_phi_ses <- sqrt(rowSums((Znew %*% result_list$cov_alpha) * Znew))
+  result_list$log_phi_lower_bounds <- log_phi - 1.96 * log_phi_ses
+  result_list$log_phi_upper_bounds <- log_phi + 1.96 * log_phi_ses
+  result_list$phi_lower_bounds <- exp(result_list$log_phi_lower_bounds)
+  result_list$phi_upper_bounds <- exp(result_list$log_phi_upper_bounds)
+  
   # Estimated standard deviations
-  phi <- c(exp(Znew %*% alpha))
   var_estimates <- phi * mu
   sd_estimates <- sqrt(var_estimates)
-  result_list$phi <- phi
   result_list$var_estimates <- var_estimates
   result_list$sd_estimates <- sd_estimates
   
