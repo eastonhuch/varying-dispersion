@@ -480,7 +480,7 @@ summarize_metric_diffs <- function(x, num_digits=0, alpha=0.05, f=identity, metr
     paste0("(", diffs_mean_lower_formatted, ", ", diffs_mean_upper_formatted, ")"),
     nrow=nrow(diffs_mean))
   cis_formatted[as.logical(diag(dim1))] <- ""
-  colnames(cis_formatted) <- rep("(95% CI)", 4)
+  colnames(cis_formatted) <- rep("(95% CI)", dim1)
   result <- cbind(diffs_mean_formatted, cis_formatted)
   result_idx <- c(0, dim1) + rep(seq(dim1), each=2)
   result <- result[, result_idx]
@@ -510,26 +510,6 @@ diff_ci_df <- rbind(diff_coverage_chr, diff_length_chr)
 diff_ci_df
 xtable(diff_ci_df) %>%
   print.xtable(include.rownames = FALSE)
-
-# What's next?
-# [DONE] Add quasipoisson model
-# [DONE] Table of pairwise differences between the 3 models
-# [DONE] Use future data to select number of basis functions
-# [DONE] Analyze dispersion specifically: Can we reject constant dispersion?
-# [DONE] Could also try negative binomial model.
-# [DONE] Would be nice to show that some of these are underdispersed.
-
-# For next time:
-# [Done; yes] Use more juices and/or categories; is the difference significant?
-# [Done; yes] Try simpler variance model: Do we get better results?
-# [Done] Account for param uncertainty in NB pred interval
-
-# Asked Galeet about data: Make sure that the application is strong
-
-# March 6
-# Look at the underdispersed ones
-# Visual: Histogram of time-averaged phis across all products
-# Visual: Pull out one or two products and show estimates over time
 
 log2_avg_phis <- log2(avg_phis)
 pdf("./figures/phis.pdf", width=5, height=3)
@@ -640,4 +620,3 @@ lines(dat_upc_train$date, sizes_nb_vardisp)
 axis(1, at=date_xaxt_locations, labels=rep("", length(date_xaxt_locations)))
 axis(1, at=date_xaxt_label_locations, labels=date_xaxt_label_names)
 dev.off()
-

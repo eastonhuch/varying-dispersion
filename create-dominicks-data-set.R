@@ -1,5 +1,5 @@
 # Imports
-require("IndexNumR")
+require(IndexNumR)
 require(tidyverse)
 
 # Read in raw data
@@ -61,21 +61,3 @@ for (category in names(categories)) {
   }
 }
 write.csv(dat, "dominicks-data/all-categories.csv", row.names=FALSE)
-
-# Plot all UPCs at once
-# num_weeks <- nrow(dat_date_to_last_date)
-# sales_y_lim <- c(
-#   min(dat_date_upc_filtered$sales),
-#   max(dat_date_upc_filtered$sales))
-# plot(
-#   dat_date_to_last_date$date, rep(0.01, num_weeks),
-#   ylim = sales_y_lim,
-#   log="y",
-#   main="Sales Over Time by UPC",
-#   xlab="Date", ylab="Sales"
-# )
-# for (i in seq_along(included_upcs)) {
-#   u <- included_upcs[i]
-#   dat_single_upc <- filter(dat_date_upc_filtered, upc == u)
-#   lines(dat_single_upc$date, dat_single_upc$sales, col=i)
-# }
