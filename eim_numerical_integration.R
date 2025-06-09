@@ -2,7 +2,7 @@
 require(lattice)
 require(latticeExtra)
 require(scales)
-setwd("/path/to/gpp")
+setwd("/path/to/varying-dispersion")
 source("./gpp.R")
 
 # Set simulation parameters
@@ -95,7 +95,7 @@ param_grid$percent_eim_error <- param_grid$eim_error * 100
 param_grid$log_eim_error <- log(param_grid$eim_error)
 
 # Final plot of error
-pdf(paste0("./eim_error.pdf"), width=6, height=4)
+pdf(paste0("./figures/eim_error.pdf"), width=6, height=4)
 finite_elements <- function(x) {
   include <- (!is.na(x)) & is.finite(x)
   x[include]
@@ -115,4 +115,3 @@ levelplot(
   main=paste0("EIM Error for the GP-", P, " Model"),
   xlab=expression(mu), ylab=expression(varphi))
 dev.off()
-
