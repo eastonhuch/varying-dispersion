@@ -1,4 +1,4 @@
-.RData
+*.RData
 .Rhistory
 cmp-examples-for-candace-original-parameterization.R
 cmp-examples-for-candace.R
@@ -9,3 +9,6 @@ test-other-packages.R
 other-packages.R
 .DS_Store
 covid-data/
+*.csv
+*.pdf
+*.zip

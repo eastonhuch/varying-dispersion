@@ -135,6 +135,7 @@ date_xaxt_label_names <- sapply(date_xaxt_label_locations, get_month_year)
 min_phis <- c()
 avg_phis <- c()
 full_reduced_pvals <- c()
+epl_pvals <- c()
 for (u in upcs) {
   print(u)
   dat_non_holdout_upc <- filter(dat_non_holdout, upc==u)
@@ -148,6 +149,11 @@ for (u in upcs) {
   alpha_start[1] <- log(summary(mod_qp)$dispersion)
   mod_epl <- epl(y, X, Z, betastart = beta_start, alphastart = alpha_start,
                  tol=1e-4, max_iter=100, stephalving_maxiter=100, verbose=TRUE)
+  alpha_trig <- mod_epl$alpha[-1]
+  cov_alpha_trig <- mod_epl$cov_alpha[-1, -1]
+  chi2_epl <- c(alpha_trig %*% solve(cov_alpha_trig, alpha_trig))
+  epl_pval <- pchisq(chi2_epl, df=2, lower.tail=FALSE)
+  epl_pvals <- c(epl_pvals, epl_pval)
   min_phis <- c(min_phis, min(mod_epl$phi))
   avg_phis <- c(avg_phis, mean(mod_epl$phi))
   
@@ -176,7 +182,7 @@ for (u in upcs) {
   
   # Plot time series
   pdf(paste0("./figures/upc/", u, "-sales.pdf"), width=5, height=3)
-  par(mai=c(0.69, 0.69, 0.2, 0.05), mgp=c(2.3, 1, 0))
+  par(mai=c(0.9, 0.9, 0.1, 0), mgp=c(2.3, 1, 0), cex=1.35)
   plot(NULL, type="n",
        xlim=c(min(dat_non_holdout$date), max(dat_non_holdout$date)),
        ylim=c(0, max(mod_dln_em$pred_upper_bounds)*1.5),
@@ -191,11 +197,11 @@ for (u in upcs) {
     col="lightgray"
   )
   lines(dat_non_holdout_upc$date, dat_non_holdout_upc$sales)
-  legend("topleft", bg="white", col=c("lightgray", "black"), lty=c(NA, 1), pch=c(15, NA), legend=c("95% CI", "Observed"))
+  legend("topleft", bg="white", col=c("lightgray", "black"), lty=c(NA, 1), pch=c(15, NA), legend=c("95% PI", "Observed"))
   dev.off()
   
   pdf(paste0("./figures/upc/", u, "-phi.pdf"), width=5, height=3)
-  par(mai=c(0.69, 0.69, 0.2, 0.05), mgp=c(2.3, 1, 0))
+  par(mai=c(0.9, 0.9, 0.1, 0), mgp=c(2.3, 1, 0), cex=1.35)
   plot(NULL, type="n",
        xlim=c(min(dat_non_holdout$date), max(dat_non_holdout$date)),
        ylim=c(min(mod_epl$log_phi_lower_bounds), max(mod_epl$log_phi_upper_bounds)),
@@ -221,6 +227,10 @@ sum(min_phis < 1)  # 2
 # We reject constant dispersion for most products
 sum(full_reduced_pvals < 0.05)  # 243
 hist(full_reduced_pvals)
+
+# Similar results for EPL model
+sum(epl_pvals < 0.05)
+hist(epl_pvals)
 
 # Compute week-ahead predictions for 1993
 # The varying-dispersion NB model is commented out because it doesn't always fit
@@ -378,19 +388,16 @@ for (u_idx in seq(num_upcs)) {
 }
 
 # Analyze the results
-paste_ci <- function(x, l, u, num_digits) {
-  formatter <- function(y) sprintf(paste0("%.", num_digits, "f"), y)
-  paste0(
-    formatter(x),
-    " (",
-    formatter(l),
-    ", ",
-    formatter(u),
-    ")"
-  ) 
+paste_ci <- function(x, l, u, num_digits, name="Metric") {
+  formatter <- function(y) format(round(y, digits=num_digits), big.mark=",", trim=TRUE)
+  x_formatted <- formatter(x)
+  ci_formatted <- paste0(" (", formatter(l), ", ", formatter(u), ")")
+  result <- cbind(x_formatted, ci_formatted)
+  colnames(result) <- c(name, "(95% CI)")
+  result
 }
 
-summarize_metric <- function(x, num_digits=2, alpha_error=0.05, f=identity) {
+summarize_metric <- function(x, num_digits=2, alpha_error=0.05, f=identity, name="Metric") {
   ndims <- length(dim(x))
   if (ndims == 2) {
     margin1 <- 1
@@ -408,34 +415,44 @@ summarize_metric <- function(x, num_digits=2, alpha_error=0.05, f=identity) {
   z_star <- qnorm(1 - alpha_error/2)
   m_lower <- m - z_star * se
   m_upper <- m + z_star * se
-  result <- paste_ci(m, m_lower, m_upper, num_digits)
+  result <- paste_ci(m, m_lower, m_upper, num_digits, name)
   result
 }
 
 # Error table
-bias_chr <- summarize_metric(all_errors, num_digits=3, alpha=alpha_error)
-rmse_chr <- summarize_metric(all_errors^2, num_digits=3, alpha=alpha_error, f=sqrt)
-bias_rmse_df <- data.frame(
-  method=method_names,
-  bias=bias_chr,
-  rmse=rmse_chr)
+bias_chr <- summarize_metric(all_errors, num_digits=0, alpha=alpha_error, name="Bias")
+rmse_chr <- summarize_metric(all_errors^2, num_digits=0, alpha=alpha_error, f=sqrt, name="rMSE")
+elapsed_time_chr <- summarize_metric(all_elapsed_time, num_digits=4, alpha=alpha_error, f=sqrt, name="Time [sec]")
+bias_rmse_df <- cbind(
+  Method=method_names,
+  bias_chr,
+  rmse_chr,
+  elapsed_time_chr)
 print(bias_rmse_df)
-xtable(bias_rmse_df) %>%
+xtable(
+  bias_rmse_df,
+  label="tab:errors",
+  align="llrlrlrl",
+  caption="Bias and rMSE for the week-ahead predictions on the DFF data set. The values in parentheses indicate 95\\% Monte Carlo confidence intervals.") %>%
   print.xtable(include.rownames = FALSE)
 
 # Coverage
-coverage_chr <- summarize_metric(all_covered, num_digits=3, alpha=alpha_error)
-length_chr <- summarize_metric(all_lengths, num_digits=3, alpha=alpha_error)
-ci_df <- data.frame(
-  method=pred_method_names,
-  coverage=coverage_chr,
-  length=length_chr)
+coverage_chr <- summarize_metric(all_covered, num_digits=3, alpha=alpha_error, name="Coverage")
+length_chr <- summarize_metric(all_lengths, num_digits=0, alpha=alpha_error, name="Avg Length")
+ci_df <- cbind(
+  Method=pred_method_names,
+  coverage_chr,
+  length_chr)
 print(ci_df)
-xtable(ci_df) %>%
+xtable(
+  ci_df,
+  label="tab:pred-coverage",
+  align="llrlrl",
+  caption="Coverage and average lengths for 95\\% prediction intervals (95\\% CI)") %>%
   print.xtable(include.rownames = FALSE)
 
 # Difference between models
-summarize_metric_diffs <- function(x, num_digits=2, alpha=0.05, f=identity, metric_name="Metric") {
+summarize_metric_diffs <- function(x, num_digits=0, alpha=0.05, f=identity, metric_name="Metric") {
   x_means <- f(apply(x, MARGIN=c(1, 2), FUN=mean))
   dim1_names <- dimnames(x_means)[[1]]
   dim1 <- dim(x_means)[1]
@@ -452,20 +469,38 @@ summarize_metric_diffs <- function(x, num_digits=2, alpha=0.05, f=identity, metr
   z_star <- qnorm(1 - alpha_error/2)
   diffs_mean_lower <- diffs_mean - z_star * diffs_mean_se
   diffs_mean_upper <- diffs_mean + z_star * diffs_mean_se
-  result <- paste_ci(diffs_mean, diffs_mean_lower, diffs_mean_upper, num_digits)
-  result_mat <- matrix(result, nrow=dim1, ncol=dim1)
-  result_df <- as.data.frame(result_mat)
-  colnames(result_df) <- dim1_names
-  result_df <- cbind(metric=metric_name, method=dim1_names, result_df)
-  result_df
+  
+  formatter <- function(y) format(round(y, digits=num_digits), big.mark=",", trim=TRUE)
+  diffs_mean_formatted <- formatter(diffs_mean)
+  colnames(diffs_mean_formatted) <- dim1_names
+  diffs_mean_formatted[as.logical(diag(dim1))] <- "-"
+  diffs_mean_lower_formatted <- formatter(diffs_mean_lower)
+  diffs_mean_upper_formatted <- formatter(diffs_mean_upper)
+  cis_formatted <- matrix(
+    paste0("(", diffs_mean_lower_formatted, ", ", diffs_mean_upper_formatted, ")"),
+    nrow=nrow(diffs_mean))
+  cis_formatted[as.logical(diag(dim1))] <- ""
+  colnames(cis_formatted) <- rep("(95% CI)", 4)
+  result <- cbind(diffs_mean_formatted, cis_formatted)
+  result_idx <- c(0, dim1) + rep(seq(dim1), each=2)
+  result <- result[, result_idx]
+  result <- cbind(
+    Metric=metric_name,
+    Method=dim1_names,
+    result)
+  result
 }
 
 # Error diffs
-diff_bias_chr <- summarize_metric_diffs(all_errors, num_digits=3, alpha=alpha, metric_name="Bias")
-diff_rmse_chr <- summarize_metric_diffs(all_errors^2, num_digits=3, alpha=alpha, f=sqrt, metric_name="rMSE")
+diff_bias_chr <- summarize_metric_diffs(all_errors, num_digits=0, alpha=alpha, metric_name="Bias")
+diff_rmse_chr <- summarize_metric_diffs(all_errors^2, num_digits=0, alpha=alpha, f=sqrt, metric_name="rMSE")
 diff_df <- rbind(diff_bias_chr, diff_rmse_chr)
 diff_df
-xtable(diff_df) %>%
+xtable(
+  diff_df,
+  label="tab:error-diff",
+  align="lllrlrlrlrl",
+  caption="Pairwise differences between methods in terms of bias and rMSE (95\\% CIs).") %>%
   print.xtable(include.rownames = FALSE)
 
 # Coverage diffs
@@ -498,15 +533,21 @@ xtable(diff_ci_df) %>%
 
 log2_avg_phis <- log2(avg_phis)
 pdf("./figures/phis.pdf", width=5, height=3)
-par(mai=c(0.69, 0.69, 0.33, 0.14), mgp=c(2.3, 1, 0))
+par(mai=c(0.9, 0.9, 0.1, 0), mgp=c(2.3, 1, 0), cex=1.35)
 hist(
   log2_avg_phis,
-  main=expression(paste("Histogram of ", hat(phi))),
+  # main=expression(paste("Histogram of ", hat(phi))),
+  main="",
   xlab=expression(hat(phi)),
-  xaxt="n")
+  ylab="# UPCs",
+  ylim=c(0, 40),
+  xaxt="n",
+  yaxt="n")
 phis_xaxt_locations <- seq(0, ceiling(max(log2_avg_phis)), 3)
 phis_xaxt_labels <- format(2^phis_xaxt_locations, big.mark=",", trim=TRUE)
 axis(1, at=phis_xaxt_locations, labels=phis_xaxt_labels)
+phis_yaxt_locations <- c(0, 10, 20, 30, 40)
+axis(2, at=phis_yaxt_locations)
 dev.off()
 
 # Look at plots for these UPCs
@@ -552,12 +593,12 @@ sizes_nb_vardisp <- mus_nb_vardisp^2 / (vars_nb_vardisp - mus_nb_vardisp)
 nb_vardisp_lower_bound <- qnbinom(0.025, size=sizes_nb_vardisp, mu=mus_nb_vardisp)
 nb_vardisp_upper_bound <- qnbinom(0.975, size=sizes_nb_vardisp, mu=mus_nb_vardisp)
 
-pdf(paste0("./figures/upc-error/", u, "-fit.pdf"), width=5, height=3)
-par(mai=c(0.69, 0.69, 0.2, 0.05), mgp=c(2.3, 1, 0))
+pdf(paste0("./figures/upc-error/", selected_upc, "-fit.pdf"), width=5, height=3)
+par(mai=c(0.9, 0.9, 0.1, 0), mgp=c(2.3, 1, 0), cex=1.35)
 plot(NULL, type="n",
      xlim=c(min(dat_upc_train$date), max(dat_upc_train$date)),
      ylim=c(0, 350),
-     main="Sales vs. Model Fit",
+     # main="Sales vs. Model Fit",
      xlab="Date", ylab="Sales",
      xaxt="n"
 )
@@ -573,29 +614,30 @@ axis(1, at=date_xaxt_locations, labels=rep("", length(date_xaxt_locations)))
 axis(1, at=date_xaxt_label_locations, labels=date_xaxt_label_names)
 dev.off()
 
-pdf(paste0("./figures/upc-error/", u, "-dispersion.pdf"), width=5, height=3)
-par(mai=c(0.69, 0.69, 0.2, 0.05), mgp=c(2.3, 1, 0))
+pdf(paste0("./figures/upc-error/", selected_upc, "-dispersion.pdf"), width=5, height=3)
+par(mai=c(0.9, 0.9, 0.1, 0), mgp=c(2.3, 1, 0), cex=1.35)
 disp_nb_vardisp <- vars_nb_vardisp / mus_nb_vardisp
 plot(NULL, type="n", xaxt="n",
      xlim=c(min(dat_upc_train$date), max(dat_upc_train$date)),
      ylim=c(0.8, 22), xlab="Date",
-     ylab="Estimated Dispersion", log="y",
-     main="Estimated Dispersion over Time")
+     # main="Estimated Dispersion over Time",
+     ylab="Estimated Dispersion", log="y")
 abline(h=1, col="lightgray", lty=2)
 lines(dat_upc_train$date, disp_nb_vardisp)
 axis(1, at=date_xaxt_locations, labels=rep("", length(date_xaxt_locations)))
 axis(1, at=date_xaxt_label_locations, labels=date_xaxt_label_names)
 dev.off()
 
-pdf(paste0("./figures/upc-error/", u, "-log-size.pdf"), width=5, height=3)
-par(mai=c(0.69, 0.69, 0.2, 0.05), mgp=c(2.3, 1, 0))
+pdf(paste0("./figures/upc-error/", selected_upc, "-log-size.pdf"), width=5, height=3)
+par(mai=c(0.9, 0.9, 0.1, 0), mgp=c(2.3, 1, 0), cex=1.35)
 plot(NULL, type="n", xaxt="n",
      xlim=c(min(dat_upc_train$date), max(dat_upc_train$date)),
      ylim=c(min(sizes_nb_vardisp), max(sizes_nb_vardisp)), xlab="Date",
-     ylab="Estimated Size", log="y",
-     main="Estimated Size Parameter over Time")
+     # main="Estimated Size Parameter over Time",
+     ylab="Estimated Size", log="y")
 abline(h=1, col="lightgray", lty=2)
 lines(dat_upc_train$date, sizes_nb_vardisp)
 axis(1, at=date_xaxt_locations, labels=rep("", length(date_xaxt_locations)))
 axis(1, at=date_xaxt_label_locations, labels=date_xaxt_label_names)
 dev.off()
+

@@ -1,11 +1,16 @@
-# gpp: Generalized Poisson P Regression Model
+# Forecasting Count Data with Varying Dispersion: A Latent-Variable Approach
 
-The gpp repository contains R code for fitting the generalized Poisson P (GP-P) regression model developed in Zamani & Ismail (2012).
-The functionality in the repository will be explained in a forthcoming paper by the repository's author and his collaborator, Candace Berrett, PhD.
+This repository contains code for reproducing the simulation study and case studies for the forthcoming paper ``Forecasting Count Data with Varying Dispersion: A Latent-Variable Approach'' by Easton K. Huch, Candace Berrett, Mason Ferlic, and Kimberly F. Sellers.
 
+To reproduce the prediction interval simulation, execute the script `pred-interval-simulation.R`.
 
-## References
+To reproduce the simulation study, compile the R Markdown notebook in the `simulation_study` directory.
 
-- Hossein Zamani & Noriszura Ismail (2012) Functional Form for the Generalized
-Poisson Regression Model, Communications in Statistics - Theory and Methods, 41:20, 3666-3675,
-DOI: 10.1080/03610926.2011.564742
+To reproduce the Dominicks case study, first download the data files for the `cer`, `coo`, and `cra` categories into the corresponding directories within the `dominicks-data` directory.
+This can be accomplished by rendering the notebook `download-dominicks-data.ipynb` or by manually downloading the files from [the Kilts Center for Marketing](https://www.chicagobooth.edu/research/kilts/research-data/dominicks).
+Second, run the script `create-dominicks-data-set.R` to perform preprocessing.
+Third, run the script `dominicks.R` to analyze the processed data.
+
+To reproduce the COVID data set, download the files `country-lookup.csv`, `index.csv`, `demographics.csv`, `economy.csv`, `health.csv`, and `epidemiology.csv` from [Google Health](https://health.google.com/covid-19/open-data/raw-data).
+Then execute the file `create-covid-data-set.R`.
+Finally, execute the file `covid-case-study.R`.
