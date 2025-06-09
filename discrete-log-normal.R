@@ -79,19 +79,6 @@ get_kappa <- function(z_bar, z_underbar, q) {
   kappa_q
 }
 
-# Tests for the above function
-# Easy cases
-# z_underbar <- c(-7, -1  , -1, 0.1, 0, 6)
-# z_bar      <- c(-6, -0.1,  0, 1. , 1, 7)
-# q <- 3
-# get_kappa(z_bar, z_underbar, q)
-# (z_bar^q * dnorm(z_bar) - z_underbar^q * dnorm(z_underbar)) /
-#   (pnorm(z_bar) - pnorm(z_underbar))
-# Weird cases
-# z_underbar <- c(-Inf, -100, -7, -1, 0, 6, 20, 99)
-# z_bar <-      c(-4. ,  -99, -6,  0, 1, 7, 21, 100)
-# z_bar^q * dnorm(z_bar) / pnorm(z_bar) # For -Inf cases
-
 gradutils <- function(y, X, Z, beta, alpha) {
   mu <- drop(X %*% beta)
   sigma <- exp(drop(Z %*% alpha))
@@ -434,18 +421,3 @@ dln <- function(
   
   result_list
 }
-
-# mod_dln_newton <- dln(y, X, Z, beta_start, alpha_start, method="Newton", max_iter=100, stephalving_maxiter=10, tol=1e-16, verbose=TRUE)
-# mod_dln_em <- dln(y, X, Z, beta_start, alpha_start, method="EM", max_iter=100, stephalving_maxiter=10, tol=1e-16, verbose=TRUE)
-
-# Same estimates!!!
-# mod_dln_newton$theta
-# mod_dln_em$theta
-
-# Use this for testing
-# betastart <- beta_start
-# alphastart <- alpha_start
-# max_iter <- 100
-# stephalving_maxiter <- 10
-# tol <- 1e-8
-# verbose <- TRUE
