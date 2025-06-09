@@ -1,6 +1,6 @@
 # Forecasting Count Data with Varying Dispersion: A Latent-Variable Approach
 
-This repository contains code for reproducing the simulation study and case studies for the forthcoming paper ``Forecasting Count Data with Varying Dispersion: A Latent-Variable Approach'' by Easton K. Huch, Candace Berrett, Mason Ferlic, and Kimberly F. Sellers.
+This repository contains code for reproducing the simulation study and case studies for the forthcoming paper "Forecasting Count Data with Varying Dispersion: A Latent-Variable Approach" by Easton K. Huch, Candace Berrett, Mason Ferlic, and Kimberly F. Sellers.
 
 To reproduce the figure comparing the approximate expected Fisher information for the GP-P model to its exact value, execute the script `eim_numerical_integration.R`.
 
