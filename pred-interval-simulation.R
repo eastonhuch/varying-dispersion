@@ -141,9 +141,6 @@ for (n in n_vals) {
   })
   
   # Interval widths
-  # rep_interval_widths <- apply(y_star_interval_widths, MARGIN=c(2,3), function(x) mean(x, na.rm=TRUE))
-  # interval_widths[as.character(n),] <- colMeans(rep_interval_widths, na.rm=TRUE)
-  # interval_width_ses[as.character(n),] <- apply(rep_interval_widths, 2, function(x) sd(x, na.rm=TRUE)) / sqrt(reps)
   rep_interval_width_medians <- apply(y_star_interval_widths, MARGIN=c(2,3), function(x) median(x, na.rm=TRUE))
   interval_width_medians[as.character(n),] <- apply(rep_interval_width_medians, 2, function(x) median(x, na.rm=TRUE))
   interval_width_medians_ses[as.character(n),] <- apply(rep_interval_width_medians, 2, function(x) {
@@ -195,7 +192,6 @@ metric_names <- c(
 )
 result_df_t <- cbind(Summary=metric_names, result_df_t)
 
-# metric_names <- c("Marginal Coverage", "Coverage rMSE", "Median Length")
 xtable(
   result_df_t,
   align="lllrrrr",
@@ -207,5 +203,4 @@ xtable(
     include.rownames=FALSE,
     sanitize.text.function=identity,
     hline.after=c(-1, 0, 3, 6, 9)
-    # add.to.row=list(pos=list(0), command=paste0(" ", paste0('& \\multicolumn{', num_methods, '}{c}{', metric_names, '} ', collapse=''), '\\\\')),
   )
