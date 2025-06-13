@@ -1,0 +1,73 @@
+---
+title: "Simulation Study: DLN Data-Generating Model"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r simdat, echo=F}
+simnames <-c('SimComPoisTruth2025050850.Rdata', 'SimComPoisTruth20250508100.Rdata', 'SimComPoisTruth20250508250.Rdata', 'SimComPoisTruth20250508500.Rdata', 'SimComPoisTruth202505081000.Rdata')
+myn <- c(50, 100, 250, 500, 1000)
+temp1 <- NULL
+nmods <- 8
+modnames <- c("Pois", "QP", "NB", "MPCMP", "GP-1", "EPL", "DLN-N", "DLN-EM")
+for(ii in 1:length(simnames)){
+  load(simnames[ii])
+  mymumse <- matrix(0, 1000, nmods)
+  mysigmamse <- matrix(0, 1000, nmods)
+  na_est <- matrix(0, 1000, nmods)
+  for(jj in 1:nmods){
+    for(kk in 1:1000){
+      mymumse[kk,jj] <- mean((mu_estimates[,kk,modnames[jj]] -mu)^2, na.rm=T)
+      mysigmamse[kk, jj] <- mean((sd_estimates[,kk,modnames[jj]] - sd_true)^2, na.rm=T)
+      na_est[kk, jj] <- mean(is.na(mu_estimates[,kk,modnames[jj]]))
+    }
+  }
+
+  temp1[[ii]] <- list(dat=dat, mu_avg_interval_width=mu_avg_interval_width, mu_avg_rmse=apply(mymumse, 2, mean, na.rm=T), #(apply((mu_estimates - array(rep(mu, 1000*5), c(400, 1000, 5)))^2,3,mean, na.rm=T)),
+                      fittim = apply(fitting_times, 2, mean, na.rm=T),
+                      mu_coverage_rMSE=mu_coverage_rMSE, mu_marginal_coverage=apply(mu_covered, 3, mean, na.rm=T), sd_avg_interval_width=sd_avg_interval_width, sd_avg_rmse=apply(mysigmamse,2,mean, na.rm=T), #(apply((sd_estimates - array(rep(sd_true, 1000*5), c(400, 1000, 5)))^2,3,mean, na.rm=T)),
+                      sd_coverage_rMSE=sd_coverage_rMSE, sd_marginal_coverage=apply(sd_covered, 3, mean, na.rm=T), var_true=var_true,  mu=mu, beta_true=beta_true, alpha_true=alpha_true, mu_estimates=mu_estimates, sd_obs_cov=apply(sd_covered, c(1,3), mean, na.rm=T), mu_obs_cov=apply(mu_covered, c(1,3), mean, na.rm=T), na_est=apply(na_est, 2, mean))
+
+  png(paste0("Figs/MuComPoisTruthCoveragen",myn[ii],".png"), width=7.5,height=5.1,units="in", res=300)
+  muplot <- apply(mu_covered, c(1,3), mean, na.rm=T)
+  colnames(muplot) <- c("Pois", "QP", "NB", "MPCMP", "GP-1", "EPL", "DLN-N", "DLN-EM")
+  boxplot(muplot, main=expression("Coverage for "~mu[i]), ylim=c(0.75,1), plot=T, ylab="Coverage For n Observations", xlab="Method")
+  title(paste("n =",myn[ii]), line=.75)
+  abline(h=.95, col='darkgray', lty=2)
+  boxplot(muplot, add=T)
+  dev.off()
+
+  png(paste0("Figs/SigmaComPoisTruthCoveragen",myn[ii],".png"), width=7.5,height=5.1,units="in", res=300)
+  sdplot <- apply(sd_covered, c(1,3), mean, na.rm=T)
+  colnames(sdplot) <- c("Pois", "QP", "NB", "MPCMP", "GP-1", "EPL", "DLN-N", "DLN-EM")
+  boxplot(sdplot, main=expression("Coverage for "~sigma[i]), ylim=c(0,1), plot=T, ylab="Coverage For n Observations", xlab="Method")
+  title(paste("n =",myn[ii]), line=.75)
+  abline(h=.95, col='darkgray', lty=2)
+  boxplot(sdplot, add=T)
+  dev.off()
+}
+
+```
+
+
+## Amount of overdispersion
+
+```{r overdispamount, echo=F}
+for(ii in 1:length(simnames)){
+  print(paste("Data", ii, ":", mean(temp1[[ii]]$var_true/temp1[[ii]]$mu)))
+}
+```
+
+
+## Fitting Times
+
+```{r fittime1, echo=F}
+for(ii in 1:length(simnames)){
+  print(paste("Data", ii, ":"))
+  print(temp1[[ii]]$fittim)
+}
+```
