@@ -6,7 +6,7 @@ To reproduce the figure comparing the approximate expected Fisher information fo
 
 To reproduce the prediction interval simulation, execute the script `pred-interval-simulation.R`.
 
-To reproduce the main simulation study, execute the R files in the `simulation_study` directory.
+To reproduce the main simulation study, execute the R files in the `simulation_study` directory and render the .Rmd files.
 
 To reproduce the Dominicks case study, first download the data files for the `cer`, `coo`, and `cra` categories into the corresponding directories within the `dominicks-data` directory.
 This can be accomplished by rendering the notebook `download-dominicks-data.ipynb` or by manually downloading the files from the [Kilts Center for Marketing](https://www.chicagobooth.edu/research/kilts/research-data/dominicks).
