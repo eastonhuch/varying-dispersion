@@ -10,7 +10,12 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r simdat, echo=F}
-simnames <-c('SimComPoisTruth2025091950.Rdata', 'SimComPoisTruth20250919100.Rdata', 'SimComPoisTruth20250919250.Rdata', 'SimComPoisTruth20250919500.Rdata', 'SimComPoisTruth202509191000.Rdata')
+simnames <-c(
+  'SimComPoisTruthDim2025091950.Rdata',
+  'SimComPoisTruthDim20250919100.Rdata',
+  'SimComPoisTruthDim20250919250.Rdata',
+  'SimComPoisTruthDim20250919500.Rdata',
+  'SimComPoisTruthDim202509191000.Rdata')
 myn <- c(50, 100, 250, 500, 1000)
 temp1 <- NULL
 nmods <- 8
@@ -33,7 +38,7 @@ for(ii in 1:length(simnames)){
                       mu_coverage_rMSE=mu_coverage_rMSE, mu_marginal_coverage=apply(mu_covered, 3, mean, na.rm=T), sd_avg_interval_width=sd_avg_interval_width, sd_avg_rmse=apply(mysigmamse,2,mean, na.rm=T), #(apply((sd_estimates - array(rep(sd_true, 1000*5), c(400, 1000, 5)))^2,3,mean, na.rm=T)),
                       sd_coverage_rMSE=sd_coverage_rMSE, sd_marginal_coverage=apply(sd_covered, 3, mean, na.rm=T), var_true=var_true,  mu=mu, beta_true=beta_true, alpha_true=alpha_true, mu_estimates=mu_estimates, sd_obs_cov=apply(sd_covered, c(1,3), mean, na.rm=T), mu_obs_cov=apply(mu_covered, c(1,3), mean, na.rm=T), na_est=apply(na_est, 2, mean))
 
-  png(paste0("Figs/MuComPoisTruthCoveragen",myn[ii],".png"), width=7.5,height=5.1,units="in", res=300)
+  png(paste0("Figs/MuComPoisTruthCoverageDimn",myn[ii],".png"), width=7.5,height=5.1,units="in", res=300)
   muplot <- apply(mu_covered, c(1,3), mean, na.rm=T)
   colnames(muplot) <- c("Pois", "QP", "NB", "MPCMP", "GP-1", "EPL", "DLN-N", "DLN-EM")
   boxplot(muplot, main=expression("Coverage for "~mu[i]), ylim=c(0.75,1), plot=T, ylab="Coverage For n Observations", xlab="Method")
@@ -42,7 +47,7 @@ for(ii in 1:length(simnames)){
   boxplot(muplot, add=T)
   dev.off()
 
-  png(paste0("Figs/SigmaComPoisTruthCoveragen",myn[ii],".png"), width=7.5,height=5.1,units="in", res=300)
+  png(paste0("Figs/SigmaComPoisTruthCoverageDimn",myn[ii],".png"), width=7.5,height=5.1,units="in", res=300)
   sdplot <- apply(sd_covered, c(1,3), mean, na.rm=T)
   colnames(sdplot) <- c("Pois", "QP", "NB", "MPCMP", "GP-1", "EPL", "DLN-N", "DLN-EM")
   boxplot(sdplot, main=expression("Coverage for "~sigma[i]), ylim=c(0,1), plot=T, ylab="Coverage For n Observations", xlab="Method")

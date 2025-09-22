@@ -2,6 +2,7 @@
 require(tidyverse)
 
 # Read in and process data
+# This lookup can be downloaded from lukes/ISO-3166-Countries-with-Regional-Codes on GitHub
 country_lookup <- read.csv("./covid-data/country-lookup.csv") %>% select(
   name,
   alpha.2,

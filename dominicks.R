@@ -11,6 +11,7 @@ source("cmp-helpers.R")
 source("gpp.R")
 source("moment-methods.R")
 source("discrete-log-normal.R")
+require(mpcmp)
 
 # Read in data
 omitted_upcs <- c(1780013217)  # Sudden drops causing model fitting issues
@@ -229,7 +230,7 @@ sum(full_reduced_pvals < 0.05)  # 243
 hist(full_reduced_pvals)
 
 # Similar results for EPL model
-sum(epl_pvals < 0.05)
+sum(epl_pvals < 0.05) # 208
 hist(epl_pvals)
 
 # Compute week-ahead predictions for 1993
@@ -281,6 +282,17 @@ analyze_upc_prediction_date <- function(u, prediction_date, alpha_error=0.05, ve
   nb_upper_bound <- quantile(sampled_outcomes_nb, probs=1-alpha_error/2, na.rm=TRUE)
   nb_end_time <- Sys.time()
   nb_elapsed_time <- nb_end_time - nb_start_time
+  
+  # MPCMP fails to fit
+  # The code below can be used to estimate how long it would take to run
+  # cmp_start_time <- Sys.time()
+  # dat_upc_train$sales_mod <- round(dat_upc_train$sales / 10)
+  # X_formula_mod <- update.formula(X_formula, sales_mod ~ .)
+  # Z_formula_mod <- update.formula(Z_formula, sales_mod ~ .)
+  # cmp_results <- fit_cmp(X_formula_mod, Z_formula_mod, dat_upc_train)
+  # cmp_end_time <- Sys.time()
+  # cmp_elapsed_time <- cmp_end_time - cmp_start_time
+  # as.numeric(cmp_elapsed_time) * num_upcs * num_prediction_dates / (60 * 60)
   
   # nb_vardisp_start_time <- Sys.time()
   # mod_nb_vardisp <- suppressWarnings(glmmTMB(y_train ~ 0 + X_train, dispformula=~0+Z_train, family=nbinom2))
