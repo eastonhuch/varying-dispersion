@@ -524,7 +524,7 @@ xtable(diff_ci_df) %>%
   print.xtable(include.rownames = FALSE)
 
 log2_avg_phis <- log2(avg_phis)
-pdf("./figures/phis.pdf", width=5, height=3)
+pdf("./figures/phis.pdf", width=3, height=3)
 par(mai=c(0.9, 0.9, 0.1, 0), mgp=c(2.3, 1, 0), cex=1.35)
 hist(
   log2_avg_phis,
@@ -631,4 +631,26 @@ abline(h=1, col="lightgray", lty=2)
 lines(dat_upc_train$date, sizes_nb_vardisp)
 axis(1, at=date_xaxt_locations, labels=rep("", length(date_xaxt_locations)))
 axis(1, at=date_xaxt_label_locations, labels=date_xaxt_label_names)
+dev.off()
+
+# method, upc, prediction_date
+mse_method_date <- apply(all_errors^2, c(1, 3), mean)
+rmse_method_date <- sqrt(mse_method_date)
+rmse_colors <- c("#0072B2", "#E69F00", "#CC79A7", "#F0E442")
+pdf(paste0("./figures/rmse-time.pdf"), width=5, height=3)
+par(mai=c(0.9, 0.9, 0.1, 0), mgp=c(2.3, 1, 0), cex=1.35)
+plot(NULL, type="n", xaxt="n", yaxt="n",
+     xlim=c(first_prediction_date, last_date),
+     ylim=c(300, 40000), xlab="Date",
+     ylab="RMSE", log="y")
+# abline(h=1, col="lightgray", lty=2)
+for (m in seq(num_methods)) {
+  m_name <- method_names[m]
+  rmse_m <- rmse_method_date[m_name,]
+  lines(as.Date(names(rmse_m)), rmse_m, col=rmse_colors[m], lwd=2)
+}
+legend("topleft", legend=method_names, col=rmse_colors, lty=1, lwd=2, horiz=TRUE, seg.len=0.7, bty="n")
+abline(h=14000)
+axis(1, at=date_xaxt_locations, labels=sapply(date_xaxt_locations, get_month_year))
+axis(2, at=c(300, 2000, 20000), labels=c("300", "2,000", "20,000"))
 dev.off()
