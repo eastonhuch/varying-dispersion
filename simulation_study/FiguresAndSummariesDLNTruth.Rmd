@@ -1,6 +1,8 @@
 ---
 title: "Simulation Study: DLN Data-Generating Model"
-output: pdf_document
+output:
+  html_document:
+    df_print: paged
 ---
 
 ```{r setup, include=FALSE}
@@ -9,8 +11,8 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 ```{r simdat, echo=F}
-simnames <- c('SimDLNTruth2025050850.Rdata', 'SimDLNTruth20250508100.Rdata', 'SimDLNTruth20250508250.Rdata', 'SimDLNTruth20250508500.Rdata')
-myn <- c(50, 100, 250, 500)
+simnames <- c('SimDLNTruth2025091950.Rdata', 'SimDLNTruth20250919100.Rdata', 'SimDLNTruth20250919250.Rdata', 'SimDLNTruth20250919500.Rdata', 'SimDLNTruth202509191000.Rdata')
+myn <- c(50, 100, 250, 500, 1000)
 temp1 <- NULL
 nmods <- 8
 for(ii in 1:length(simnames)){
