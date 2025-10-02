@@ -11,7 +11,7 @@ source("discrete-log-normal.R")
 ### 
 # Heat maps of mean and standard deviation as mu[z] and sigma[z] change
 
-musdz <- expand.grid(muz=seq(-2, 8, length=90), sdz=seq(0.5, 3.23, length=25))
+musdz <- expand.grid(muz=seq(0, 8, length=90), sdz=seq(0.2, 3.2, length=25))
 
 musdz$muy <- integrate_dln(musdz$muz, musdz$sdz, 1)
 ey2 <- integrate_dln(musdz$muz, musdz$sdz, 2)
@@ -149,45 +149,48 @@ p2 <- ggplot(musdz, aes(x=muz, y=sdz, fill=log(sdy))) +
 
 # PMF varying mu
 muzlist <- c(2, 2.5, 3)
-y <- 0:20
+y <- 0:30
 mypal <- brewer.pal(6, "Dark2")
 
 pmf_mu <- data.frame()
-sigfix <- 0.5
+sigfix <- 0.2
 for(i in seq_along(muzlist)){
   ddln <- pnorm((log(y+1) - muzlist[i])/sigfix) - pnorm((log(y) - muzlist[i])/sigfix)
   pmf_mu <- rbind(pmf_mu, data.frame(y, ddln, mu = muzlist[i], sigma = 1))
 }
 
-p3 <- ggplot(pmf_mu, aes(y, ddln, color=factor(mu))) +
-  geom_line(linetype=2, linewidth=0.5) +
-  geom_point(size=2.5) +
+p3 <- ggplot(pmf_mu, aes(y, ddln, color=factor(mu), shape=factor(mu))) +
+  geom_line(linetype=2, linewidth=0.3) +
+  geom_point(size=1.2) +
   scale_color_brewer(palette="Dark2") +
   labs(x="y", y="Density",
        color=expression(mu[z]),
+       shape=expression(mu[z]),
        title=expression("DLN pmf (varying"~mu[z]*")")) +
   theme_minimal() + 
-  ylim(c(0, .17))
+  ylim(c(0, 0.32))
 
 # PMF varying sigma
-sigmazlist <- c(0.5,1,2)
+sigmazlist <- c(0.1, 0.2, 0.4)
+mufix <- 2.5
 pmf_sigma <- data.frame()
 for(i in seq_along(sigmazlist)){
-  ddln <- pnorm((log(y+1)-2)/sigmazlist[i]) - pnorm((log(y)-2)/sigmazlist[i])
+  ddln <- pnorm((log(y+1)-mufix)/sigmazlist[i]) - pnorm((log(y)-mufix)/sigmazlist[i])
   pmf_sigma <- rbind(pmf_sigma, data.frame(y, ddln, mu=1, sigma = sigmazlist[i]))
 }
 
-p4 <- ggplot(pmf_sigma, aes(y, ddln, color=factor(sigma))) +
-  geom_line(linetype=2, linewidth=0.5) +
-  geom_point(size=2.5) +
+p4 <- ggplot(pmf_sigma, aes(y, ddln, color=factor(sigma), shape=factor(sigma))) +
+  geom_line(linetype=2, linewidth=0.3) +
+  geom_point(size=1.2) +
   scale_color_brewer(palette="Set2") +
   labs(x="y", y="Density",
        color=expression(sigma[z]),
+       shape=expression(sigma[z]),
        title=expression("DLN pmf (varying"~sigma[z]*")")) +
   theme_minimal() + 
-  ylim(c(0,0.17))
+  ylim(c(0,0.32))
 
 # Combine all 4
 (p3 | p4) / (p1 | p2)
 
-ggsave("figures/DLNFigure.png")
+ggsave("./figures/DLNFigure.pdf", width=6.75, height=4)
