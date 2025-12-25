@@ -10,7 +10,11 @@ fit_cmp <- function(formula_mu, formula_nu, data, delta=0.0001) {
   mod_cmp <- mpcmp::glm.cmp(
     formula=formula_mu,
     formula_nu=formula_nu,
-    data=data
+    data=data,
+    lambdalb=1e-12,
+    lambdaub=10000,
+    maxlambdaiter=10000,
+    tol=1e-8
   )
   
   # Extract model components
