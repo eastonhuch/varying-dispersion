@@ -52,7 +52,7 @@ align_vec <- c(
 
 xt <- xtable(df, 
              align = align_vec,
-             caption = "Performance metrics for the simulation study with $n=1000$ and two data-generating processes (DGPs): MPCMP and DLN. The MPCMP and EPL methods perform best under the MPCMP DGP, followed by the DLN methods. Under the DLN DGP, the DLN methods perform relatively better.",
+             caption = "Performance metrics for the simulation study with $n=1000$ and two data-generating processes (DGPs): MPCMP and DLN. The MPCMP and EPL methods perform best under the MPCMP DGP, followed by the DLN methods. Under the DLN DGP, the DLN methods perform relatively better. The values in parentheses denote Monte Carlo standard errors rounded to the nearest hundredth.",
              label = "tab:sim-metrics")
 
 addtorow <- list()
