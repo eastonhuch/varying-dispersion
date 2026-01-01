@@ -1,8 +1,8 @@
 ################################
 # Simulation to compare mean and sd estimation
 # when data is generated using COM-Pois
-# September 19, 2025
-# In this version, I'm adding additional covariates
+# Dec 23, 2025
+# Increasing precision of COM-Pois estimation
 ################################
 
 require(mpcmp) #install_github("thomas-fung/mpcmp")
@@ -15,7 +15,7 @@ source("discrete-log-normal.R")
 
 # Generate some data
 
-myns <- c(50L, 100L, 250L, 500L, 1000L)
+myns <- c(100L, 250L, 500L, 1000L)
 for(n in myns){
   set.seed(20240501+n)
   #n <- 400L
@@ -51,8 +51,8 @@ for(n in myns){
   stephalving_max <- 50
 
   # Prepare to loop
-  reps <- 1000L
-  method_names <- c("Pois", "QP", "NB","MPCMP", "GP-1", "EPL", "DLN-N", "DLN-EM")
+  reps <- 100L
+  method_names <- c("Pois", "QP", "NB", "MPCMP", "GP-1", "EPL", "DLN-N", "DLN-EM")
   # method_names <- c("GP-1", "EPL")  # Removing a method from the list removes it from the simulation
   num_methods <- length(method_names)
   mu_estimates <- array(0, dim=c(n, reps, num_methods), dimnames = list(NULL, NULL, method_names))
@@ -131,21 +131,21 @@ for(n in myns){
       sd_lbnd <- lowerbnd*(lowerbnd+mod_nb$theta)/mod_nb$theta #this is the variance even though it's labeled as sd
       sd_ubnd <- upperbnd*(upperbnd+mod_nb$theta)/mod_nb$theta
       sd_covered[,i,"NB"] <- (sqrt(sd_lbnd) <= sd_true) & (sd_true <= sqrt(sd_ubnd))
-      sd_interval_widths[,i,"NB"] <- sqrt(sd_ubnd) - sqrt(sd_ubnd)
+      sd_interval_widths[,i,"NB"] <- sqrt(sd_ubnd) - sqrt(sd_lbnd)
     })
 
     # Fit MPCMP model
     if ("MPCMP" %in% method_names ) {
       start_time <- Sys.time()
-      mod_cmp <- tryCatch(fit_cmp(master_formula, master_formula, data=dat, delta=1e-4), error=function(e) e)
+      mod_cmp <- tryCatch(fit_cmp(master_formula, master_formula, data=dat, delta=1e-6), error=function(e) e)
       if(!is.null(mod_cmp$message)){
-        mod_cmp <- tryCatch(fit_cmp(master_formula, master_formula, data=dat, delta=1e-4, beta_true=beta_true), error=function(e) e)
+        mod_cmp <- tryCatch(fit_cmp(master_formula, master_formula, data=dat, delta=1e-6, beta_true=beta_true), error=function(e) e)
       }
       if(!is.null(mod_cmp$message)){
-        mod_cmp <- tryCatch(fit_cmp(master_formula, master_formula, data=dat, delta=1e-4, beta_true=beta_true), error=function(e) e)
+        mod_cmp <- tryCatch(fit_cmp(master_formula, master_formula, data=dat, delta=1e-6, beta_true=beta_true), error=function(e) e)
       }
       if(!is.null(mod_cmp$message)){
-        mod_cmp <- tryCatch(fit_cmp(master_formula, master_formula, data=dat, delta=1e-4, beta_true=beta_true), error=function(e) e)
+        mod_cmp <- tryCatch(fit_cmp(master_formula, master_formula, data=dat, delta=1e-6, beta_true=beta_true), error=function(e) e)
       }
       end_time <- Sys.time()
       elapsed_time <- end_time - start_time
@@ -254,53 +254,102 @@ for(n in myns){
   }
 
   nominal_coverage <- 0.95
-  format_float <- label_number(0.001)
-  format_percent <- label_percent(0.1)
+  format_float <- label_number(0.01)
+  format_float_with_se <- function(m, se) {
+    paste0(
+      format_float(m), " (",
+      format_float(se), ")"
+    )
+  }
+  format_percent <- label_percent(1)
+  format_percent_with_se <- function(m, se) {
+    paste0(
+      format_percent(m), " (",
+      format_percent(se), ")"
+    )
+  }
 
   # Fitting times
   avg_fitting_times <- colMeans(fitting_times)
-  consolidated_results <- data.frame(`Avg Elapsed Time (Seconds)`=format_float(avg_fitting_times), check.names=FALSE)
+  avg_fitting_times_se <- apply(fitting_times, 2, function(x) sd(x)/sqrt(length(x)))
+  consolidated_results <- data.frame(`Avg Elapsed Time (Seconds)`=format_float_with_se(avg_fitting_times, avg_fitting_times_se), check.names=FALSE)
   boxplot(fitting_times, log="y", main="Model-fitting Time by Method", ylab="Elapsed Time (Seconds)")
+  
+  # NA values
+  is_na <- is.na(mu_estimates) | is.na(mu_covered) | is.na(sd_estimates) | is.na(sd_covered)
+  na_rep <- apply(is_na, c(2, 3), mean)
+  na_avg <- apply(na_rep, 2, mean)
+  na_avg_se <- apply(na_rep, 2, function(x) sd(x) / sqrt(length(x)))
+  consolidated_results$`Percent Failed` <- format_percent_with_se(na_avg, na_avg_se)
 
   # Mean
-  mu_rmse <- sqrt(apply((mu_estimates - mu)^2, MARGIN=c(1,3), mean))
-  mu_avg_rmse <- colMeans(mu_rmse)
-  mu_observation_coverage <- apply(mu_covered, MARGIN=c(1,3), mean)
-  mu_marginal_coverage <- colMeans(mu_observation_coverage)
-  mu_coverage_rMSE <- sqrt(colMeans((mu_observation_coverage - nominal_coverage)^2))
-  mu_avg_interval_width <- apply(mu_interval_widths, MARGIN=c(3), mean)
+  mu_bias_rep <- apply(mu_estimates - mu, MARGIN=c(2,3), function(x) mean(x, na.rm=TRUE))
+  mu_avg_bias <- apply(mu_bias_rep, MARGIN=2, function(x) mean(x, na.rm=TRUE))
+  mu_avg_bias_se <- apply(mu_bias_rep, MARGIN=2, function(x) sd(x, na.rm=TRUE)/sqrt(length(x)))
+  mu_rmse_rep <- apply((mu_estimates - mu)^2, MARGIN=c(2,3), function(x) sqrt(mean(x, na.rm=TRUE)))
+  mu_avg_rmse <- apply(mu_rmse_rep, MARGIN=2, function(x) mean(x, na.rm=TRUE))
+  mu_avg_rmse_se <- apply(mu_rmse_rep, MARGIN=2, function(x) sd(x, na.rm=TRUE)/sqrt(length(x)))
+  mu_rep_coverage <- apply(mu_covered, MARGIN=c(2,3), function(x) mean(x, na.rm=TRUE))
+  mu_marginal_coverage <- apply(mu_rep_coverage, 2, function(x) mean(x, na.rm=TRUE))
+  mu_marginal_coverage_se <- apply(mu_rep_coverage, 2, function(x) sd(x, na.rm=TRUE)/sqrt(length(x)))
+  get_coverage_rMSE <- function(covered_array) {
+    observation_coverage <- apply(covered_array, MARGIN=c(1,3), function(x) mean(x, na.rm=TRUE))
+    coverage_rMSE <- apply((observation_coverage - nominal_coverage)^2, 2, function(x) sqrt(mean(x, na.rm=TRUE)))
+    coverage_rMSE
+  }
+  mu_coverage_rMSE <- get_coverage_rMSE(mu_covered)
+  n_bootstrap <- 1000
+  mu_coverage_rMSE_bootstrap <- sapply(seq(n_bootstrap), function(i) {
+    idx <- sample(seq(reps), reps, replace=TRUE)
+    mu_covered_boot <- mu_covered[,idx,]
+    coverage_rMSE <- get_coverage_rMSE(mu_covered_boot)
+    coverage_rMSE
+  })
+  mu_coverage_rMSE_se <- apply(mu_coverage_rMSE_bootstrap, 1, sd)
+  mu_interval_widths_rep <- apply(mu_interval_widths, c(2,3), mean)
+  mu_avg_interval_width <- apply(mu_interval_widths_rep, 2, function(x) mean(x, na.rm=TRUE))
+  mu_avg_interval_width_se <- apply(mu_interval_widths_rep, 2, function(x) sd(x, na.rm=TRUE))
 
-  consolidated_results$`Mean: Avg rMSE` <- format_float(mu_avg_rmse)
-  consolidated_results$`Mean: Avg Interval Width` <- format_float(mu_avg_interval_width)
-  consolidated_results$`Mean: Marginal Coverage` <- format_percent(mu_marginal_coverage)
-  consolidated_results$`Mean: Coverage rMSE` <- format_float(mu_coverage_rMSE)
+  consolidated_results$`Mean: Bias` <- format_float_with_se(mu_avg_bias, mu_avg_bias_se)
+  consolidated_results$`Mean: RMSE` <- format_float_with_se(mu_avg_rmse, mu_avg_rmse_se)
+  consolidated_results$`Mean: CI Width` <- format_float_with_se(mu_avg_interval_width, mu_avg_interval_width_se)
+  consolidated_results$`Mean: Marginal Coverage` <- format_percent_with_se(mu_marginal_coverage, mu_marginal_coverage_se)
+  consolidated_results$`Mean: Coverage RMSE` <- format_float_with_se(mu_coverage_rMSE, mu_coverage_rMSE_se)
 
   # SD
-  sd_avg <- apply(sd_estimates, MARGIN=c(1,3), mean)
-  sd_rmse <- sqrt(apply((sd_estimates - sd_true)^2, MARGIN=c(1,3), mean))
-  sd_avg_rmse <- colMeans(sd_rmse)
-  sd_observation_coverage <- apply(sd_covered, MARGIN=c(1,3), mean)
-  sd_marginal_coverage <- colMeans(sd_observation_coverage)
-  sd_coverage_rMSE <- sqrt(colMeans((sd_observation_coverage - nominal_coverage)^2))
-  sd_avg_interval_width <- apply(sd_interval_widths, MARGIN=c(3), mean)
-
-  consolidated_results$`SD: Avg rMSE` <- format_float(sd_avg_rmse)
-  consolidated_results$`SD: Avg Interval Width` <- format_float(sd_avg_interval_width)
-  consolidated_results$`SD: Marginal Coverage` <- format_percent(sd_marginal_coverage)
-  consolidated_results$`SD: Coverage rMSE` <- format_float(sd_coverage_rMSE)
-
-  # Plot avg SD vs. x2
-  sd_order <- order(sd_true)
-  plot(x2[sd_order], sd_true[sd_order], xlab=expression(x[2]), ylab="SD", ylim=c(2.5, 7))
-  points(x2[sd_order], sd_avg[sd_order, "DLN-N"], col=2)
-  points(x2[sd_order], sd_avg[sd_order, "MPCMP"], col=3)
+  sd_bias_rep <- apply(sd_estimates - sd_true, MARGIN=c(2,3), function(x) mean(x, na.rm=TRUE))
+  sd_avg_bias <- apply(sd_bias_rep, MARGIN=2, function(x) mean(x, na.rm=TRUE))
+  sd_avg_bias_se <- apply(sd_bias_rep, MARGIN=2, function(x) sd(x, na.rm=TRUE)/sqrt(length(x)))
+  sd_rmse_rep <- apply((sd_estimates - sd_true)^2, MARGIN=c(2,3), function(x) sqrt(mean(x, na.rm=TRUE)))
+  sd_avg_rmse <- apply(sd_rmse_rep, MARGIN=2, function(x) mean(x, na.rm=TRUE))
+  sd_avg_rmse_se <- apply(sd_rmse_rep, MARGIN=2, function(x) sd(x, na.rm=TRUE)/sqrt(length(x)))
+  sd_rep_coverage <- apply(sd_covered, MARGIN=c(2,3), function(x) mean(x, na.rm=TRUE))
+  sd_marginal_coverage <- apply(sd_rep_coverage, 2, function(x) mean(x, na.rm=TRUE))
+  sd_marginal_coverage_se <- apply(sd_rep_coverage, 2, function(x) sd(x, na.rm=TRUE)/sqrt(length(x)))
+  sd_coverage_rMSE <- get_coverage_rMSE(sd_covered)
+  sd_coverage_rMSE_bootstrap <- sapply(seq(n_bootstrap), function(i) {
+    idx <- sample(seq(reps), reps, replace=TRUE)
+    sd_covered_boot <- sd_covered[,idx,]
+    coverage_rMSE <- get_coverage_rMSE(sd_covered_boot)
+    coverage_rMSE
+  })
+  sd_coverage_rMSE_se <- apply(sd_coverage_rMSE_bootstrap, 1, sd)
+  sd_interval_widths_rep <- apply(sd_interval_widths, c(2,3), mean)
+  sd_avg_interval_width <- apply(sd_interval_widths_rep, 2, function(x) mean(x, na.rm=TRUE))
+  sd_avg_interval_width_se <- apply(sd_interval_widths_rep, 2, function(x) sd(x, na.rm=TRUE))
+  
+  consolidated_results$`SD: Bias` <- format_float_with_se(sd_avg_bias, sd_avg_bias_se)
+  consolidated_results$`SD: RMSE` <- format_float_with_se(sd_avg_rmse, sd_avg_rmse_se)
+  consolidated_results$`SD: CI Width` <- format_float_with_se(sd_avg_interval_width, sd_avg_interval_width_se)
+  consolidated_results$`SD: Marginal Coverage` <- format_percent_with_se(sd_marginal_coverage, sd_marginal_coverage_se)
+  consolidated_results$`SD: Coverage RMSE` <- format_float_with_se(sd_coverage_rMSE, sd_coverage_rMSE_se)
 
   # How often did we use score-based covariance?
   colSums(used_score_for_cov)
 
   # Make table pretty
-  final_table <- t(consolidated_results)
-  #View(final_table)
+  rownames(consolidated_results) <- method_names
+  #View(consolidated_results)
 
-  save.image(file=paste0("SimComPoisTruthDim20250919",n,".Rdata"))
+  save.image(file=paste0("SimComPoisTruthDim20251223", n, ".Rdata"))
 }

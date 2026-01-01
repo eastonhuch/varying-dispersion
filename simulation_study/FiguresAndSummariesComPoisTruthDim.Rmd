@@ -11,22 +11,21 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r simdat, echo=F}
 simnames <-c(
-  'SimComPoisTruthDim2025091950.Rdata',
-  'SimComPoisTruthDim20250919100.Rdata',
-  'SimComPoisTruthDim20250919250.Rdata',
-  'SimComPoisTruthDim20250919500.Rdata',
-  'SimComPoisTruthDim202509191000.Rdata')
-myn <- c(50, 100, 250, 500, 1000)
+  'SimComPoisTruthDim20251223100.Rdata',
+  'SimComPoisTruthDim20251223250.Rdata',
+  'SimComPoisTruthDim20251223500.Rdata',
+  'SimComPoisTruthDim202512231000.Rdata')
+myn <- c(100, 250, 500, 1000)
 temp1 <- NULL
 nmods <- 8
 modnames <- c("Pois", "QP", "NB", "MPCMP", "GP-1", "EPL", "DLN-N", "DLN-EM")
 for(ii in 1:length(simnames)){
   load(simnames[ii])
-  mymumse <- matrix(0, 1000, nmods)
-  mysigmamse <- matrix(0, 1000, nmods)
-  na_est <- matrix(0, 1000, nmods)
+  mymumse <- matrix(0, 100, nmods)
+  mysigmamse <- matrix(0, 100, nmods)
+  na_est <- matrix(0, 100, nmods)
   for(jj in 1:nmods){
-    for(kk in 1:1000){
+    for(kk in 1:100){
       mymumse[kk,jj] <- mean((mu_estimates[,kk,modnames[jj]] -mu)^2, na.rm=T)
       mysigmamse[kk, jj] <- mean((sd_estimates[,kk,modnames[jj]] - sd_true)^2, na.rm=T)
       na_est[kk, jj] <- mean(is.na(mu_estimates[,kk,modnames[jj]]))

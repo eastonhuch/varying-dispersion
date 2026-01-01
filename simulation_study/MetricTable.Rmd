@@ -1,0 +1,81 @@
+---
+title: "Simulation Study: Metric Table"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(dplyr)
+require(xtable)
+```
+
+```{r simdat, echo=F}
+simnames <-c('SimComPoisTruth202512231000.Rdata', 'SimDLNTruth202512231000.Rdata')
+load(simnames[1])
+consolidated_results$DGP <- "MPCMP"
+consolidated_results$Method <- row.names(consolidated_results)
+consolidated_results_combined <- consolidated_results
+load(simnames[2])
+consolidated_results$DGP <- "DLN"
+consolidated_results$Method <- row.names(consolidated_results)
+df <- rbind(consolidated_results_combined, consolidated_results) %>%
+  select(
+    "DGP",
+    "Method",
+    "Mean: Bias", 
+    "Mean: RMSE",
+    "Mean: CI Width",
+    "SD: Bias",
+    "SD: RMSE",
+    "SD: CI Width"
+)
+# write.csv(consolidated_results_combined, "consolidate_results.csv", row.names=FALSE)
+
+df$DGP <- ""
+df$DGP[1] <- "\\multirow{8}{*}{\\textbf{MPCMP}}"
+df$DGP[9] <- "\\multirow{8}{*}{\\textbf{DLN}}"
+df$`SD: CI Width`[16] <- paste0(df$`SD: CI Width`[16], "\\vspace{2pt}")
+
+align_vec <- c(
+  "l",                # Rownames (placeholder)
+  "l",                # Col 1: DGP
+  "l@{\\hskip 12pt}", # Col 2: Method (with spacing after)
+  "r",                # Col 3: Bias
+  "r",                # Col 4: RMSE
+  "r@{\\hskip 12pt}", # Col 5: CI (with spacing after)
+  "r",                # Col 6: SD Bias
+  "r",                # Col 7: SD RMSE
+  "r"                 # Col 8: SD CI
+)
+
+xt <- xtable(df, 
+             align = align_vec,
+             caption = "Performance metrics for the simulation study with $n=1000$ and two data-generating processes (DGPs): MPCMP and DLN. The MPCMP and EPL methods perform best under the MPCMP DGP, followed by the DLN methods. Under the DLN DGP, the DLN methods perform relatively better. The values in parentheses denote Monte Carlo standard errors rounded to the nearest hundredth.",
+             label = "tab:sim-metrics")
+
+addtorow <- list()
+addtorow$pos <- list(-1, 8) # Header, Middle split, Bottom
+addtorow$command <- c(
+  # Header
+  paste0(
+    "\\hline \\vspace{-8pt}\\\\\n",
+    " & & \\multicolumn{3}{c}{\\textbf{Observation Mean} ($\\mu_i$)} &  \\multicolumn{3}{c}{\\textbf{Observation SD} ($\\sigma_i$)} \\vspace{2pt}\\\\\n",
+    " DGP & Method & \\multicolumn{1}{c}{Bias} & \\multicolumn{1}{c}{RMSE} & \\multicolumn{1}{c}{CI Width\\phantom{\\hspace{8pt}}} & \\multicolumn{1}{c}{Bias} & \\multicolumn{1}{c}{RMSE} & \\multicolumn{1}{c}{CI Width} \\vspace{2pt} \\\\\n", 
+    " \\hline \\vspace{-8pt} \\\\\n"
+  ),
+  # Middle Split (Spacing between blocks)
+  "\\vspace{-6pt}\\\\\n"
+)
+
+print(xt, 
+      include.rownames = FALSE, 
+      include.colnames = FALSE, 
+      sanitize.text.function = function(x) x, # Crucial: Allows \multirow code to pass through
+      add.to.row = addtorow, 
+      caption.placement = "bottom",
+      hline.after = c(nrow(df)),
+      size = "\\footnotesize",
+      booktabs = FALSE)
+```
